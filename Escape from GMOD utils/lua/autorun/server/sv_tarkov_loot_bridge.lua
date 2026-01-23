@@ -200,4 +200,4 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
         -- Return false to BLOCK the entity's default behavior
         -- (e.g. stop the workshop addon from opening its own menu)
         return false
-    end
+    end)
