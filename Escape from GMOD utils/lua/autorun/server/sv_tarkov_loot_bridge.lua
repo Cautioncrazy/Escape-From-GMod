@@ -31,13 +31,54 @@ local LOOT_POOLS = {
 
 -- Helper to get random item from pool
 local function GetRandomItem(poolName)
-    local pool = LOOT_POOLS[poolName] or LOO_POOLS["random"]
+    local pool = LOOT_POOLS[poolName] or LOOT_POOLS["random"]
     return pool[math.random(#pool)]
+end
+
+-- Helper to open the loot interface (generates loot if needed)
+local function OpenLootCache(ply, ent)
+    local poolTag = ent:GetNWString("LootPool", "random")
+
+    -- 3. GENERATE LOOT (Only if not already looted/generated)
+    if not ent.CacheInventory then
+        ent.CacheInventory = {}
+
+        -- Generate 3-8 items based on the tag
+        for i=1, math.random(3, 8) do
+            local slot = math.random(1, 20) -- 20 is cache size
+            local item = GetRandomItem(poolTag)
+
+            if not ent.CacheInventory[slot] then
+                ent.CacheInventory[slot] = item
+            end
+        end
+        -- print("[Tarkov Bridge] Generated loot for box.")
+    end
+
+    -- 4. OPEN INVENTORY MENU
+    -- Set this entity as the player's active cache session
+    ply.ActiveLootCache = ent
+
+    -- Sync the cache data to the player's "cache" container slot in their session
+    if ply.TarkovData then
+        ply.TarkovData.Containers.cache = table.Copy(ent.CacheInventory)
+
+        -- Send update to client (This opens the menu because IsCacheOpen will be true)
+        net.Start(TAG .. "_Update")
+        net.WriteTable(ply.TarkovData)
+        net.WriteBool(true) -- Tell client cache is OPEN
+        net.Send(ply)
+
+        ply:EmitSound("items/ammo_pickup.wav")
+
+        -- Force open menu command just in case
+        ply:ConCommand("tarkov_open_inventory")
+    end
 end
 
 -- HOOK: PlayerUse
 -- Intercepts the use key on loot entities
-hook.Add("PlayerUse","TarkovBridge_Use"), function(ply, ent)
+hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
     if not IsValid(ent) then return end
 
     local class = ent:GetClass()
@@ -58,80 +99,52 @@ hook.Add("PlayerUse","TarkovBridge_Use"), function(ply, ent)
     end
 
     -- This code block will only be reached if the entity is a loot container
-        -- Safety: If searching flag got stuck but timer is gone, reset it
-        if ply.IsSearching and (ply.SearchEndTime or 0) < CurTime() then
-            ply.IsSearching = false
-        end
+    -- Safety: If searching flag got stuck but timer is gone, reset it
+    if ply.IsSearching and (ply.SearchEndTime or 0) < CurTime() then
+        ply.IsSearching = false
+    end
 
-        -- Prevent spam / check if already searching
-        if ply.IsSearching then return false end
+    -- Prevent spam / check if already searching
+    if ply.IsSearching then return false end
 
-        -- Get the pool tag set by your Admin Tool
-        local poolTag = ent:GetNWString("LootPool", "random")
-        -- print("[Tarkov Bridge] Found Loot Box! Pool: " .. poolTag)
-
-        -- 1. START SEARCHING (Visuals)
-        ply.IsSearching = true
-        ply.SearchEndTime = CurTime() + 3.5 -- Safety timeout
-
-        ply:EmitSound("physics/cardboard/cardboard_box_impact_soft2.wav")
-
-        -- Send Search Progress Bar to Client
-        net.Start(TAG .. "_SearchUI")
-        net.WriteFloat(3.0) -- 3.0 Seconds duration
-        net.Send(ply)
-
-        -- 2. TIMER (Logic)
-        timer.Create("TarkovSearch_" .. ply:SteamID64(), 3.0, 1, function()
-            if not IsValid(ply) then return end
-            ply.IsSearching = false
-
-            if not IsValid(ent) then return end
-
-            -- Validate Distance
-            if ply:GetPos():DistToSqr(ent:GetPos()) > 150*150 then
-                ply:ChatPrint("You moved too far away.")
-                return
-            end
-
-            -- 3. GENERATE LOOT (Only if not already looted/generated)
-            if not ent.CacheInventory then
-                ent.CacheInventory = {}
-
-                -- Generate 3-8 items based on the tag
-                for i=1, math.random(3, 8) do
-                    local slot = math.random(1, 20) -- 20 is cache size
-                    local item = GetRandomItem(poolTag)
-
-                    if not ent.CacheInventory[slot] then
-                        ent.CacheInventory[slot] = item
-                    end
-                end
-                -- print("[Tarkov Bridge] Generated loot for box.")
-            end
-
-            -- 4. OPEN INVENTORY MENU
-            -- Set this entity as the player's active cache session
-            ply.ActiveLootCache = ent
-
-            -- Sync the cache data to the player's "cache" container slot in their session
-            if ply.TarkovData then
-                ply.TarkovData.Containers.cache = table.Copy(ent.CacheInventory)
-
-                -- Send update to client (This opens the menu because IsCacheOpen will be true)
-                net.Start(TAG .. "_Update")
-                net.WriteTable(ply.TarkovData)
-                net.WriteBool(true) -- Tell client cache is OPEN
-                net.Send(ply)
-
-                ply:EmitSound("items/ammo_pickup.wav")
-
-                -- Force open menu command just in case
-                ply:ConCommand("tarkov_open_inventory")
-            end
-        end)
-
-        -- Return false to BLOCK the entity's default behavior
-        -- (e.g. stop the workshop addon from opening its own menu)
+    -- Check if already searched
+    if ent.SearchedBy and ent.SearchedBy[ply] then
+        OpenLootCache(ply, ent)
         return false
     end
+
+    -- 1. START SEARCHING (Visuals)
+    ply.IsSearching = true
+    ply.SearchEndTime = CurTime() + 3.5 -- Safety timeout
+
+    ply:EmitSound("physics/cardboard/cardboard_box_impact_soft2.wav")
+
+    -- Send Search Progress Bar to Client
+    net.Start(TAG .. "_SearchUI")
+    net.WriteFloat(3.0) -- 3.0 Seconds duration
+    net.Send(ply)
+
+    -- 2. TIMER (Logic)
+    timer.Create("TarkovSearch_" .. ply:SteamID64(), 3.0, 1, function()
+        if not IsValid(ply) then return end
+        ply.IsSearching = false
+
+        if not IsValid(ent) then return end
+
+        -- Validate Distance
+        if ply:GetPos():DistToSqr(ent:GetPos()) > 150*150 then
+            ply:ChatPrint("You moved too far away.")
+            return
+        end
+
+        -- Mark as searched
+        ent.SearchedBy = ent.SearchedBy or {}
+        ent.SearchedBy[ply] = true
+
+        OpenLootCache(ply, ent)
+    end)
+
+    -- Return false to BLOCK the entity's default behavior
+    -- (e.g. stop the workshop addon from opening its own menu)
+    return false
+end)
