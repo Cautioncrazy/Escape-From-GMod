@@ -24,6 +24,10 @@ function GetItemData(id)
     return ITEMS[id]
 end
 
+function GetAllTarkovItems()
+    return ITEMS
+end
+
 -- --- ITEM DEFINITIONS ---
 
 -- 1. GEAR (Containers & Armor)

@@ -20,24 +20,90 @@ local CACHE_ENTITIES = {
 }
 
 -- LOOT TABLES (Simple list of item IDs from sh_tarkov_inventory.lua)
--- You can expand this list with more specific items
-local LOOT_POOLS = {
-    ["weapons"] = {"weapon_pistol", "weapon_smg1", "medkit"},
-    ["medical"] = {"medkit", "medkit", "tushonka"},
-    ["misc"] = {"scrap", "tushonka", "backpack_scav"},
-    ["rare"] = {"bitcoin", "weapon_smg1", "rig_combine"},
-    ["random"] = {"tushonka", "medkit", "bitcoin", "weapon_pistol", "backpack_scav", "scrap", "rig_combine"}
-}
+-- LOOT TABLES (Dynamic now)
+local LOOT_POOLS = {}
+
+local function BuildLootPools()
+    LOOT_POOLS = {
+        ["weapons"] = {},
+        ["medical"] = {},
+        ["misc"] = {},
+        ["rare"] = {},
+        ["random"] = {},
+        ["ammo"] = {},
+        ["entities"] = {},
+        ["gear"] = {}
+    }
+
+    if not GetAllTarkovItems then return end
+    local items = GetAllTarkovItems()
+
+    for id, data in pairs(items) do
+        -- Add to Random
+        table.insert(LOOT_POOLS["random"], id)
+
+        -- Determine Category
+        local name = string.lower(data.Name or "")
+        local desc = string.lower(data.Desc or "")
+        local type = data.Type
+        local slot = data.Slot
+
+        local isWeapon = (type == "equip" and (slot == "Primary" or slot == "Secondary"))
+        local isGear = (type == "equip" and (slot == "Backpack" or slot == "Rig" or slot == "Armor"))
+        local isAmmo = (string.find(name, "ammo") or string.find(desc, "ammo") or string.find(name, "round") or string.find(desc, "cartridge") or string.find(desc, "magazine"))
+        local isMedical = (string.find(name, "med") or string.find(name, "health") or string.find(name, "heal") or string.find(desc, "heal") or id == "tushonka") -- Tushonka is food but keeps you alive :P
+
+        -- Special handling for "Category" field if it was captured from entity registry
+        local cat = string.lower(data.Desc or "") -- In sh_tarkov_inventory, Desc often contains "Category: ..."
+        if string.find(cat, "ammo") then isAmmo = true end
+
+        if isWeapon then
+            table.insert(LOOT_POOLS["weapons"], id)
+        elseif isAmmo then
+            table.insert(LOOT_POOLS["ammo"], id)
+        elseif isMedical then
+            table.insert(LOOT_POOLS["medical"], id)
+        elseif isGear then
+            table.insert(LOOT_POOLS["gear"], id)
+        elseif type == "item" then
+            -- If it's an item and not ammo/med, it's likely an entity or misc
+            -- If it was registered from scripted_ents and not handled above
+            if not isAmmo and not isMedical then
+                table.insert(LOOT_POOLS["entities"], id)
+                table.insert(LOOT_POOLS["misc"], id) -- Also put in misc
+            end
+        else
+            table.insert(LOOT_POOLS["misc"], id)
+        end
+
+        -- Rare check (Simple keyword search)
+        if string.find(name, "rare") or string.find(desc, "valuable") or id == "bitcoin" or id == "armor_hev" then
+            table.insert(LOOT_POOLS["rare"], id)
+        end
+    end
+
+    -- Fallbacks if empty
+    if #LOOT_POOLS["weapons"] == 0 then table.insert(LOOT_POOLS["weapons"], "weapon_pistol") end
+    if #LOOT_POOLS["random"] == 0 then table.insert(LOOT_POOLS["random"], "tushonka") end
+
+    print("[Tarkov Loot] Generated Loot Pools. Total Items: " .. table.Count(items))
+end
+
+hook.Add("InitPostEntity", "TarkovBuildLootPools", function()
+    -- Run after a short delay to ensure all items are registered
+    timer.Simple(1, BuildLootPools)
+end)
 
 -- Helper to get random item from pool
 local function GetRandomItem(poolName)
-    local pool = LOOT_POOLS[poolName] or LOO_POOLS["random"]
+    local pool = LOOT_POOLS[poolName] or LOOT_POOLS["random"]
+    if not pool or #pool == 0 then return "tushonka" end
     return pool[math.random(#pool)]
 end
 
 -- HOOK: PlayerUse
 -- Intercepts the use key on loot entities
-hook.Add("PlayerUse","TarkovBridge_Use"), function(ply, ent)
+hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
     if not IsValid(ent) then return end
 
     local class = ent:GetClass()

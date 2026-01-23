@@ -111,7 +111,10 @@ function TOOL.BuildCPanel(panel)
     
     AddTagButton("random")
     AddTagButton("weapons")
+    AddTagButton("ammo")
+    AddTagButton("gear")
     AddTagButton("medical")
+    AddTagButton("entities")
     AddTagButton("misc")
     AddTagButton("rare")
     
