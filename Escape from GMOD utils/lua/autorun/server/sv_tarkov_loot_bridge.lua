@@ -37,7 +37,7 @@ end
 
 -- HOOK: PlayerUse
 -- Intercepts the use key on loot entities
-hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
+hook.Add("PlayerUse","TarkovBridge_Use"), function(ply, ent)
     if not IsValid(ent) then return end
 
     local class = ent:GetClass()
@@ -135,4 +135,3 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
         -- (e.g. stop the workshop addon from opening its own menu)
         return false
     end
-end)
