@@ -124,6 +124,20 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
     end
 
     -- This code block will only be reached if the entity is a loot container
+
+        -- CLOSE LOGIC: If already open, close it (with delay)
+        if ply.ActiveLootCache == ent then
+            if (ply.LootOpenTime and CurTime() > ply.LootOpenTime + 0.5) then
+                ply.ActiveLootCache = nil
+                net.Start(TAG .. "_Update")
+                net.WriteTable(ply.TarkovData)
+                net.WriteBool(false)
+                net.Send(ply)
+                ply:EmitSound("items/ammo_pickup.wav")
+            end
+            return false
+        end
+
         -- Safety: If searching flag got stuck but timer is gone, reset it
         if ply.IsSearching and (ply.SearchEndTime or 0) < CurTime() then
             ply.IsSearching = false
@@ -134,7 +148,40 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
 
         -- Get the pool tag set by your Admin Tool
         local poolTag = ent:GetNWString("LootPool", "random")
-        -- print("[Tarkov Bridge] Found Loot Box! Pool: " .. poolTag)
+
+        -- Helper to Ensure Loot Exists
+        local function EnsureLoot()
+             if not ent.CacheInventory then
+                ent.CacheInventory = {}
+                -- Generate 3-8 items based on the tag
+                for i=1, math.random(3, 8) do
+                    local slot = math.random(1, 20)
+                    local item = GetRandomItem(poolTag)
+                    if not ent.CacheInventory[slot] then
+                        ent.CacheInventory[slot] = item
+                    end
+                end
+            end
+        end
+
+        -- PERSISTENCE: Check if already searched
+        if ply.SearchedCaches and ply.SearchedCaches[ent:EntIndex()] then
+            EnsureLoot()
+
+            ply.ActiveLootCache = ent
+            ply.LootOpenTime = CurTime()
+
+            if ply.TarkovData then
+                ply.TarkovData.Containers.cache = table.Copy(ent.CacheInventory)
+                net.Start(TAG .. "_Update")
+                net.WriteTable(ply.TarkovData)
+                net.WriteBool(true)
+                net.Send(ply)
+                ply:EmitSound("items/ammo_pickup.wav")
+                ply:ConCommand("tarkov_open_inventory")
+            end
+            return false
+        end
 
         -- 1. START SEARCHING (Visuals)
         ply.IsSearching = true
@@ -160,25 +207,17 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
                 return
             end
 
-            -- 3. GENERATE LOOT (Only if not already looted/generated)
-            if not ent.CacheInventory then
-                ent.CacheInventory = {}
-
-                -- Generate 3-8 items based on the tag
-                for i=1, math.random(3, 8) do
-                    local slot = math.random(1, 20) -- 20 is cache size
-                    local item = GetRandomItem(poolTag)
-
-                    if not ent.CacheInventory[slot] then
-                        ent.CacheInventory[slot] = item
-                    end
-                end
-                -- print("[Tarkov Bridge] Generated loot for box.")
-            end
+            -- 3. GENERATE LOOT
+            EnsureLoot()
 
             -- 4. OPEN INVENTORY MENU
             -- Set this entity as the player's active cache session
             ply.ActiveLootCache = ent
+            ply.LootOpenTime = CurTime()
+
+            -- Mark as searched
+            if not ply.SearchedCaches then ply.SearchedCaches = {} end
+            ply.SearchedCaches[ent:EntIndex()] = true
 
             -- Sync the cache data to the player's "cache" container slot in their session
             if ply.TarkovData then
