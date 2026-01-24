@@ -11,75 +11,104 @@ util.AddNetworkString(TAG .. "_SearchUI")
 util.AddNetworkString(TAG .. "_Update")
 
 -- CONFIG: Add any entity classes that should act as loot containers here
+-- FIX: Only include actual containers, exclude individual items
 local CACHE_ENTITIES = {
     ["ent_loot_cache"] = true,
     ["item_item_crate"] = true,
     ["sent_lootbox"] = true,
     ["sim_loot_crate"] = true,
-    ["ent_loot_cache_tarkov"] = true -- Added our custom test entity just in case
+    ["ent_loot_cache_tarkov"] = true
 }
 
--- LOOT TABLES (Simple list of item IDs from sh_tarkov_inventory.lua)
--- You can expand this list with more specific items
-local LOOT_POOLS = {
-    ["weapons"] = {"weapon_pistol", "weapon_smg1", "medkit"},
-    ["medical"] = {"medkit", "medkit", "tushonka"},
-    ["misc"] = {"scrap", "tushonka", "backpack_scav"},
-    ["rare"] = {"bitcoin", "weapon_smg1", "rig_combine"},
-    ["random"] = {"tushonka", "medkit", "bitcoin", "weapon_pistol", "backpack_scav", "scrap", "rig_combine"}
-}
+-- LOOT TABLES (Dynamic now)
+local LOOT_POOLS = {}
+
+local function BuildLootPools()
+    LOOT_POOLS = {
+        ["weapons"] = {},
+        ["medical"] = {},
+        ["misc"] = {},
+        ["rare"] = {},
+        ["random"] = {},
+        ["ammo"] = {},
+        ["entities"] = {},
+        ["gear"] = {}
+    }
+
+    if not GetAllTarkovItems then return end
+    local items = GetAllTarkovItems()
+
+    for id, data in pairs(items) do
+        -- Add to Random
+        table.insert(LOOT_POOLS["random"], id)
+
+        -- Determine Category
+        local name = string.lower(data.Name or "")
+        local desc = string.lower(data.Desc or "")
+        local type = data.Type
+        local slot = data.Slot
+
+        local isWeapon = (type == "equip" and (slot == "Primary" or slot == "Secondary"))
+        local isGear = (type == "equip" and (slot == "Backpack" or slot == "Rig" or slot == "Armor"))
+        local isAmmo = (string.find(name, "ammo") or string.find(desc, "ammo") or string.find(name, "round") or string.find(desc, "cartridge") or string.find(desc, "magazine"))
+        local isMedical = (string.find(name, "med") or string.find(name, "health") or string.find(name, "heal") or string.find(desc, "heal") or id == "tushonka") -- Tushonka is food but keeps you alive :P
+
+        -- Special handling for "Category" field if it was captured from entity registry
+        local cat = string.lower(data.Desc or "") -- In sh_tarkov_inventory, Desc often contains "Category: ..."
+        if string.find(cat, "ammo") then isAmmo = true end
+
+        if isWeapon then
+            table.insert(LOOT_POOLS["weapons"], id)
+        elseif isAmmo then
+            table.insert(LOOT_POOLS["ammo"], id)
+        elseif isMedical then
+            table.insert(LOOT_POOLS["medical"], id)
+        elseif isGear then
+            table.insert(LOOT_POOLS["gear"], id)
+        elseif type == "item" then
+            -- If it's an item and not ammo/med, it's likely an entity or misc
+            -- If it was registered from scripted_ents and not handled above
+            if not isAmmo and not isMedical then
+                table.insert(LOOT_POOLS["entities"], id)
+                table.insert(LOOT_POOLS["misc"], id) -- Also put in misc
+            end
+        else
+            table.insert(LOOT_POOLS["misc"], id)
+        end
+
+        -- Rare check (Simple keyword search)
+        if string.find(name, "rare") or string.find(desc, "valuable") or id == "bitcoin" or id == "armor_hev" then
+            table.insert(LOOT_POOLS["rare"], id)
+        end
+    end
+
+    -- Fallbacks if empty
+    if #LOOT_POOLS["weapons"] == 0 then table.insert(LOOT_POOLS["weapons"], "weapon_pistol") end
+    if #LOOT_POOLS["random"] == 0 then table.insert(LOOT_POOLS["random"], "tushonka") end
+
+    print("[Tarkov Loot] Generated Loot Pools. Total Items: " .. table.Count(items))
+end
+
+hook.Add("InitPostEntity", "TarkovBuildLootPools", function()
+    -- Run after a short delay to ensure all items are registered
+    timer.Simple(1, BuildLootPools)
+end)
 
 -- Helper to get random item from pool
 local function GetRandomItem(poolName)
     local pool = LOOT_POOLS[poolName] or LOOT_POOLS["random"]
+    if not pool or #pool == 0 then return "tushonka" end
     return pool[math.random(#pool)]
-end
-
--- Helper to open the loot interface (generates loot if needed)
-local function OpenLootCache(ply, ent)
-    local poolTag = ent:GetNWString("LootPool", "random")
-
-    -- 3. GENERATE LOOT (Only if not already looted/generated)
-    if not ent.CacheInventory then
-        ent.CacheInventory = {}
-
-        -- Generate 3-8 items based on the tag
-        for i=1, math.random(3, 8) do
-            local slot = math.random(1, 20) -- 20 is cache size
-            local item = GetRandomItem(poolTag)
-
-            if not ent.CacheInventory[slot] then
-                ent.CacheInventory[slot] = item
-            end
-        end
-        -- print("[Tarkov Bridge] Generated loot for box.")
-    end
-
-    -- 4. OPEN INVENTORY MENU
-    -- Set this entity as the player's active cache session
-    ply.ActiveLootCache = ent
-
-    -- Sync the cache data to the player's "cache" container slot in their session
-    if ply.TarkovData then
-        ply.TarkovData.Containers.cache = table.Copy(ent.CacheInventory)
-
-        -- Send update to client (This opens the menu because IsCacheOpen will be true)
-        net.Start(TAG .. "_Update")
-        net.WriteTable(ply.TarkovData)
-        net.WriteBool(true) -- Tell client cache is OPEN
-        net.Send(ply)
-
-        ply:EmitSound("items/ammo_pickup.wav")
-
-        -- Force open menu command just in case
-        ply:ConCommand("tarkov_open_inventory")
-    end
 end
 
 -- HOOK: PlayerUse
 -- Intercepts the use key on loot entities
 hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
     if not IsValid(ent) then return end
+
+    -- FIX: Ignore individual pickup items (ent_loot_item)
+    -- They should use their own Use logic (manual pickup) or the trace pickup system
+    if ent.IsTarkovLootItem then return end
 
     local class = ent:GetClass()
 
@@ -89,7 +118,8 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
         -- This is a known loot box, proceed with logic
     else
         -- Not in cache, perform the expensive check
-        local isLoot = CACHE_ENTITIES[class] or string.find(class, "loot") or string.find(class, "cache")
+        -- FIX: Be more strict. Don't just match "loot" which catches "ent_loot_item"
+        local isLoot = CACHE_ENTITIES[class] or (string.find(class, "loot") and not string.find(class, "item")) or string.find(class, "cache")
         if isLoot then
             CLASS_CACHE[class] = true -- Store positive result
         else
@@ -99,6 +129,20 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
     end
 
     -- This code block will only be reached if the entity is a loot container
+
+    -- CLOSE LOGIC: If already open, close it (with delay)
+    if ply.ActiveLootCache == ent then
+        if (ply.LootOpenTime and CurTime() > ply.LootOpenTime + 0.5) then
+            ply.ActiveLootCache = nil
+            net.Start(TAG .. "_Update")
+            net.WriteTable(ply.TarkovData)
+            net.WriteBool(false)
+            net.Send(ply)
+            ply:EmitSound("items/ammo_pickup.wav")
+        end
+        return false
+    end
+
     -- Safety: If searching flag got stuck but timer is gone, reset it
     if ply.IsSearching and (ply.SearchEndTime or 0) < CurTime() then
         ply.IsSearching = false
@@ -107,9 +151,40 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
     -- Prevent spam / check if already searching
     if ply.IsSearching then return false end
 
-    -- Check if already searched
-    if ent.SearchedBy and ent.SearchedBy[ply] then
-        OpenLootCache(ply, ent)
+    -- Get the pool tag set by your Admin Tool
+    local poolTag = ent:GetNWString("LootPool", "random")
+
+    -- Helper to Ensure Loot Exists
+    local function EnsureLoot()
+         if not ent.CacheInventory then
+            ent.CacheInventory = {}
+            -- Generate 3-8 items based on the tag
+            for i=1, math.random(3, 8) do
+                local slot = math.random(1, 20)
+                local item = GetRandomItem(poolTag)
+                if not ent.CacheInventory[slot] then
+                    ent.CacheInventory[slot] = item
+                end
+            end
+        end
+    end
+
+    -- PERSISTENCE: Check if already searched
+    if ply.SearchedCaches and ply.SearchedCaches[ent:EntIndex()] then
+        EnsureLoot()
+
+        ply.ActiveLootCache = ent
+        ply.LootOpenTime = CurTime()
+
+        if ply.TarkovData then
+            ply.TarkovData.Containers.cache = table.Copy(ent.CacheInventory)
+            net.Start(TAG .. "_Update")
+            net.WriteTable(ply.TarkovData)
+            net.WriteBool(true)
+            net.Send(ply)
+            ply:EmitSound("items/ammo_pickup.wav")
+            ply:ConCommand("tarkov_open_inventory")
+        end
         return false
     end
 
@@ -137,14 +212,60 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
             return
         end
 
-        -- Mark as searched
-        ent.SearchedBy = ent.SearchedBy or {}
-        ent.SearchedBy[ply] = true
+        -- 3. GENERATE LOOT
+        EnsureLoot()
 
-        OpenLootCache(ply, ent)
+        -- 4. OPEN INVENTORY MENU
+        ply.ActiveLootCache = ent
+        ply.LootOpenTime = CurTime()
+
+        -- Mark as searched
+        if not ply.SearchedCaches then ply.SearchedCaches = {} end
+        ply.SearchedCaches[ent:EntIndex()] = true
+
+        -- Sync the cache data to the player's "cache" container slot in their session
+        if ply.TarkovData then
+            ply.TarkovData.Containers.cache = table.Copy(ent.CacheInventory)
+
+            -- Send update to client (This opens the menu because IsCacheOpen will be true)
+            net.Start(TAG .. "_Update")
+            net.WriteTable(ply.TarkovData)
+            net.WriteBool(true) -- Tell client cache is OPEN
+            net.Send(ply)
+
+            ply:EmitSound("items/ammo_pickup.wav")
+
+            -- Force open menu command just in case
+            ply:ConCommand("tarkov_open_inventory")
+        end
     end)
 
     -- Return false to BLOCK the entity's default behavior
-    -- (e.g. stop the workshop addon from opening its own menu)
     return false
+end)
+
+-- FIX: Distance Check Loop
+-- Ensure inventory closes if player walks away while it's open
+hook.Add("Think", "TarkovLootDistanceCheck", function()
+    for _, ply in ipairs(player.GetAll()) do
+        if IsValid(ply.ActiveLootCache) then
+            -- Check distance
+            if ply:GetPos():DistToSqr(ply.ActiveLootCache:GetPos()) > 150*150 then
+                -- Close it
+                ply.ActiveLootCache = nil
+
+                -- Send Close Update
+                net.Start(TAG .. "_Update")
+                if ply.TarkovData then
+                    net.WriteTable(ply.TarkovData)
+                else
+                    net.WriteTable({})
+                end
+                net.WriteBool(false)
+                net.Send(ply)
+
+                ply:ChatPrint("You moved too far away.")
+            end
+        end
+    end
 end)
