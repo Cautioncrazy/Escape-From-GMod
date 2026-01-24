@@ -24,10 +24,6 @@ function GetItemData(id)
     return ITEMS[id]
 end
 
-function GetAllTarkovItems()
-    return ITEMS
-end
-
 -- --- ITEM DEFINITIONS ---
 
 -- 1. GEAR (Containers & Armor)
@@ -265,57 +261,6 @@ if SERVER then
                 SyncInventory(ply)
             end
 
-        elseif action == "quick_move" then
-            local container = net.ReadString()
-            local index = net.ReadUInt(8)
-            
-            -- If coming from a container (cache, pockets, backpack, rig)
-            local list = ply.TarkovData.Containers[container]
-            if list and list[index] then
-                local itemID = list[index]
-                local itemData = ITEMS[itemID]
-                
-                -- Try to Auto-Equip first
-                if itemData.Type == "equip" and not ply.TarkovData.Equipment[itemData.Slot] then
-                     ply.TarkovData.Containers[container][index] = nil
-                     ply.TarkovData.Equipment[itemData.Slot] = itemID
-                     
-                     if string.sub(itemID, 1, 6) == "weapon" then ply:Give(itemID)
-                     elseif itemID == "armor_hev" then ply:EquipSuit(); ply:SetArmor(100) end
-                     if itemData.Slot == "Backpack" then ply:SetNWString("TarkovBackpack", itemData.Model) end
-                     
-                     SyncInventory(ply)
-                     return
-                end
-                
-                -- Else move to best available container (that isn't self if possible, but simplicity first)
-                -- If in Cache, try Pockets/Rig/Backpack
-                if container == "cache" then
-                    if AddItemToInventory(ply, itemID) then
-                        ply.TarkovData.Containers[container][index] = nil
-                        SyncInventory(ply)
-                    end
-                else
-                    -- If in inventory, try to move to Cache if open? 
-                    -- Or just move to another container?
-                    -- For now, "Quick Move" usually implies "Loot" -> "Inventory" or "Equip"
-                    -- Let's support Inventory -> Cache if Cache is open
-                    if IsValid(ply.ActiveLootCache) then
-                        -- Try to add to cache
-                        local cacheCap = 20
-                        for i=1, cacheCap do
-                            if not ply.TarkovData.Containers.cache[i] then
-                                ply.TarkovData.Containers.cache[i] = itemID
-                                ply.TarkovData.Containers[container][index] = nil
-                                SyncInventory(ply)
-                                return
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
         elseif action == "move" then
             local fromCont = net.ReadString()
             local fromIdx = net.ReadUInt(8)
@@ -367,6 +312,62 @@ if SERVER then
                     elseif itemID == "armor_hev" then ply:RemoveSuit(); ply:SetArmor(0) end
                     if slot == "Backpack" then ply:SetNWString("TarkovBackpack", "") end
                     SyncInventory(ply)
+                end
+            end
+
+        elseif action == "unequip_to" then
+            local slot = net.ReadString()
+            local toCont = net.ReadString()
+            local toIdx = net.ReadUInt(8)
+            local itemID = ply.TarkovData.Equipment[slot]
+
+            if itemID then
+                local toList = ply.TarkovData.Containers[toCont]
+                local toCap = GetContainerCapacity(ply, toCont)
+
+                if toList and toIdx <= toCap and not toList[toIdx] then
+                    ply.TarkovData.Equipment[slot] = nil
+                    toList[toIdx] = itemID
+
+                    if string.sub(itemID, 1, 6) == "weapon" then ply:StripWeapon(itemID)
+                    elseif itemID == "armor_hev" then ply:RemoveSuit(); ply:SetArmor(0) end
+                    if slot == "Backpack" then ply:SetNWString("TarkovBackpack", "") end
+
+                    SyncInventory(ply)
+                end
+            end
+
+        elseif action == "quick_move" then
+            local container = net.ReadString()
+            local index = net.ReadUInt(8)
+            local list = ply.TarkovData.Containers[container]
+
+            if list and list[index] then
+                local itemID = list[index]
+
+                -- 1. From Cache -> Inventory
+                if container == "cache" then
+                    if AddItemToInventory(ply, itemID) then
+                        list[index] = nil
+                        SyncInventory(ply)
+                    end
+                -- 2. From Inventory -> Equip
+                else
+                    local itemData = ITEMS[itemID]
+                    if itemData and itemData.Type == "equip" then
+                        if not ply.TarkovData.Equipment[itemData.Slot] then
+                            ply.TarkovData.Containers[container][index] = nil
+                            ply.TarkovData.Equipment[itemData.Slot] = itemID
+
+                            if string.sub(itemID, 1, 6) == "weapon" then ply:Give(itemID)
+                            elseif itemID == "armor_hev" then ply:EquipSuit(); ply:SetArmor(100) end
+                            if itemData.Slot == "Backpack" then ply:SetNWString("TarkovBackpack", itemData.Model) end
+
+                            SyncInventory(ply)
+                        else
+                             ply:ChatPrint("Slot " .. itemData.Slot .. " is occupied!")
+                        end
+                    end
                 end
             end
 
@@ -528,7 +529,7 @@ if CLIENT then
         DrawAttachedBackpack(ply, mdl)
     end)
 
-    local function CreateItemPanel(parent, itemID, w, h, onClick, draggableData, dropHandler)
+    local function CreateItemPanel(parent, itemID, w, h, onClick, draggableData, dropHandler, quickAction)
         local pnl = parent:Add("DPanel")
         pnl:SetSize(w, h)
         pnl.Paint = function(s, w, h)
@@ -568,21 +569,13 @@ if CLIENT then
 
                 local baseMousePressed = model.OnMousePressed
                 model.OnMousePressed = function(s, code)
-                    if code == MOUSE_RIGHT then
-                        if input.IsKeyDown(KEY_LCONTROL) then
-                             -- Quick Move Logic
-                             if draggableData then
-                                 net.Start(TAG .. "_Action")
-                                 net.WriteString("quick_move")
-                                 net.WriteString(draggableData.Container)
-                                 net.WriteUInt(draggableData.Index, 8)
-                                 net.SendToServer()
-                                 return
-                             end
-                        elseif onClick then
-                            onClick()
-                            return
-                        end
+                    if code == MOUSE_LEFT and input.IsKeyDown(KEY_LCONTROL) and quickAction then
+                        quickAction()
+                        return
+                    end
+                    if code == MOUSE_RIGHT and onClick then
+                        onClick()
+                        return
                     end
                     if baseMousePressed then baseMousePressed(s, code) end
                 end
@@ -699,7 +692,10 @@ if CLIENT then
                 menu:AddOption("Unequip", function() net.Start(TAG.."_Action"); net.WriteString("unequip"); net.WriteString(slotInfo.name); net.SendToServer() end)
                 menu:AddOption("Drop", function() net.Start(TAG.."_Action"); net.WriteString("drop_equip"); net.WriteString(slotInfo.name); net.SendToServer() end)
                 menu:Open()
-            end, nil, HandleEquipDrop)
+            end, { Slot = slotInfo.name, IsEquip = true }, HandleEquipDrop,
+            function() -- Quick Action (Ctrl+Click)
+                net.Start(TAG.."_Action"); net.WriteString("unequip"); net.WriteString(slotInfo.name); net.SendToServer()
+            end)
             pnl:SetPos(slotInfo.x, slotInfo.y)
             local lbl = vgui.Create("DLabel", pnl); lbl:SetText(slotInfo.name); lbl:SizeToContents(); lbl:SetPos(2, 2)
         end
@@ -744,11 +740,19 @@ if CLIENT then
                     if bDoDrop then
                         local src = panels[1].DragData
                         if src then
-                            net.Start(TAG .. "_Action")
-                            net.WriteString("move")
-                            net.WriteString(src.Container); net.WriteUInt(src.Index, 8)
-                            net.WriteString(name); net.WriteUInt(i, 8)
-                            net.SendToServer()
+                            if src.IsEquip then
+                                net.Start(TAG .. "_Action")
+                                net.WriteString("unequip_to")
+                                net.WriteString(src.Slot)
+                                net.WriteString(name); net.WriteUInt(i, 8)
+                                net.SendToServer()
+                            else
+                                net.Start(TAG .. "_Action")
+                                net.WriteString("move")
+                                net.WriteString(src.Container); net.WriteUInt(src.Index, 8)
+                                net.WriteString(name); net.WriteUInt(i, 8)
+                                net.SendToServer()
+                            end
                         end
                     end
                 end
@@ -766,7 +770,10 @@ if CLIENT then
                         end
                         menu:AddOption("Drop", function() net.Start(TAG.."_Action"); net.WriteString("drop"); net.WriteString(name); net.WriteUInt(i, 8); net.SendToServer() end)
                         menu:Open()
-                    end, dragInfo, HandleDrop)
+                    end, dragInfo, HandleDrop,
+                    function() -- Quick Action
+                        net.Start(TAG.."_Action"); net.WriteString("quick_move"); net.WriteString(name); net.WriteUInt(i, 8); net.SendToServer()
+                    end)
                     itemPnl:Dock(FILL)
                 end
             end
@@ -824,15 +831,6 @@ if CLIENT then
     hook.Add("OnPlayerChat", "ChatInv", function(ply, text) if text=="/bag" then if ply==LocalPlayer() then OpenInventory() end return true end end)
     hook.Add("KeyPress", "TarkovLootPickup", function(ply, key)
         if key == IN_USE and IsFirstTimePredicted() then
-            -- NEW: Close Inventory if Open
-            if IsValid(invFrame) then
-                 CloseDermaMenus()
-                 invFrame:Close()
-                 invFrame = nil
-                 if IsValid(cacheFrame) then cacheFrame:Remove() cacheFrame = nil end
-                 return
-            end
-
             local tr = util.TraceHull({start=ply:GetShootPos(),endpos=ply:GetShootPos()+ply:GetAimVector()*100,mins=Vector(-10,-10,-10),maxs=Vector(10,10,10),filter=ply})
             if IsValid(tr.Entity) and tr.Entity.IsTarkovLoot then net.Start(TAG.."_Pickup"); net.WriteEntity(tr.Entity); net.SendToServer() end
         end
