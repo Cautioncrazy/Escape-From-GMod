@@ -236,6 +236,56 @@ if SERVER then
                     end
                 end
             end
+
+        elseif action == "quick_move" then
+            local container = net.ReadString()
+            local index = net.ReadUInt(8)
+
+            -- If coming from a container (cache, pockets, backpack, rig)
+            local list = ply.TarkovData.Containers[container]
+            if list and list[index] then
+                local itemID = list[index]
+                local itemData = ITEMS[itemID]
+
+                -- Try to Auto-Equip first
+                if itemData.Type == "equip" and not ply.TarkovData.Equipment[itemData.Slot] then
+                     ply.TarkovData.Containers[container][index] = nil
+                     ply.TarkovData.Equipment[itemData.Slot] = itemID
+
+                     if string.sub(itemID, 1, 6) == "weapon" then ply:Give(itemID)
+                     elseif itemID == "armor_hev" then ply:EquipSuit(); ply:SetArmor(100) end
+                     if itemData.Slot == "Backpack" then ply:SetNWString("TarkovBackpack", itemData.Model) end
+
+                     SyncInventory(ply)
+                     return
+                end
+
+                -- Else move to best available container (that isn't self if possible, but simplicity first)
+                -- If in Cache, try Pockets/Rig/Backpack
+                if container == "cache" then
+                    if AddItemToInventory(ply, itemID) then
+                        ply.TarkovData.Containers[container][index] = nil
+                        SyncInventory(ply)
+                    end
+                else
+                    -- If in inventory, try to move to Cache if open?
+                    -- Or just move to another container?
+                    -- For now, "Quick Move" usually implies "Loot" -> "Inventory" or "Equip"
+                    -- Let's support Inventory -> Cache if Cache is open
+                    if IsValid(ply.ActiveLootCache) then
+                        -- Try to add to cache
+                        local cacheCap = 20
+                        for i=1, cacheCap do
+                            if not ply.TarkovData.Containers.cache[i] then
+                                ply.TarkovData.Containers.cache[i] = itemID
+                                ply.TarkovData.Containers[container][index] = nil
+                                SyncInventory(ply)
+                                return
+                            end
+                        end
+                    end
+                end
+            end
         end
 
         ply:ChatPrint("[Inventory] No space in Pockets/Rig/Backpack!")
@@ -520,6 +570,17 @@ if CLIENT then
                     if code == MOUSE_RIGHT and onClick then
                         onClick()
                         return
+                    end
+                    -- Ctrl+Click Logic
+                    if code == MOUSE_LEFT and input.IsKeyDown(KEY_LCONTROL) then
+                        if draggableData then -- draggableData contains { Container = "...", Index = ... }
+                             net.Start(TAG .. "_Action")
+                             net.WriteString("quick_move")
+                             net.WriteString(draggableData.Container)
+                             net.WriteUInt(draggableData.Index, 8)
+                             net.SendToServer()
+                             return
+                        end
                     end
                     if baseMousePressed then baseMousePressed(s, code) end
                 end
