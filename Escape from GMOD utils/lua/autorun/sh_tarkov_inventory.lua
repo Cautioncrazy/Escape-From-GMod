@@ -462,13 +462,20 @@ end
 if CLIENT then
     local LocalData = { Equipment = {}, Containers = { pockets={}, secure={}, backpack={}, rig={}, cache={} } }
     local IsCacheOpen = false
+    local CacheOpenedAt = 0 -- Track when the cache was opened
     local invFrame = nil
     local cacheFrame = nil -- NEW: Separate frame for loot cache
     local OpenInventory
 
     net.Receive(TAG .. "_Update", function()
+        local wasCacheOpen = IsCacheOpen
         LocalData = net.ReadTable()
         IsCacheOpen = net.ReadBool()
+
+        -- Detect if cache JUST opened
+        if IsCacheOpen and not wasCacheOpen then
+             CacheOpenedAt = CurTime()
+        end
 
         -- If we have a cache frame but cache is closed, close it
         if not IsCacheOpen and IsValid(cacheFrame) then
@@ -605,6 +612,16 @@ if CLIENT then
             invFrame:SetTitle("GEAR & LOOT")
             invFrame:MakePopup()
             invFrame:ShowCloseButton(true)
+
+            -- Handle 'E' to Close
+            invFrame.OnKeyCodePressed = function(self, code)
+                if code == KEY_E then
+                     if IsCacheOpen and (CurTime() < CacheOpenedAt + 1.0) then
+                          return
+                     end
+                     OpenInventory()
+                end
+            end
 
             -- Cleanup callback
             invFrame.OnRemove = function()
