@@ -135,7 +135,11 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
         if (ply.LootOpenTime and CurTime() > ply.LootOpenTime + 0.5) then
             ply.ActiveLootCache = nil
             net.Start(TAG .. "_Update")
-            net.WriteTable(ply.TarkovData)
+            if istable(ply.TarkovData) then
+                net.WriteTable(ply.TarkovData)
+            else
+                net.WriteTable({})
+            end
             net.WriteBool(false)
             net.Send(ply)
             ply:EmitSound("items/ammo_pickup.wav")
@@ -179,7 +183,11 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
         if ply.TarkovData then
             ply.TarkovData.Containers.cache = table.Copy(ent.CacheInventory)
             net.Start(TAG .. "_Update")
-            net.WriteTable(ply.TarkovData)
+            if istable(ply.TarkovData) then
+                net.WriteTable(ply.TarkovData)
+            else
+                net.WriteTable({})
+            end
             net.WriteBool(true)
             net.Send(ply)
             ply:EmitSound("items/ammo_pickup.wav")
@@ -229,7 +237,11 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
 
             -- Send update to client (This opens the menu because IsCacheOpen will be true)
             net.Start(TAG .. "_Update")
-            net.WriteTable(ply.TarkovData)
+            if istable(ply.TarkovData) then
+                net.WriteTable(ply.TarkovData)
+            else
+                net.WriteTable({})
+            end
             net.WriteBool(true) -- Tell client cache is OPEN
             net.Send(ply)
 

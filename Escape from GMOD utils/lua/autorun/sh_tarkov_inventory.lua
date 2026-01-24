@@ -236,6 +236,34 @@ if SERVER then
                     end
                 end
             end
+        end
+
+        ply:ChatPrint("[Inventory] No space in Pockets/Rig/Backpack!")
+        return false
+    end
+
+    -- Action Handler
+    net.Receive(TAG .. "_Action", function(len, ply)
+        EnsureProfile(ply)
+        local action = net.ReadString()
+
+        if action == "drop" then
+            local container = net.ReadString()
+            local index = net.ReadUInt(8)
+            local list = ply.TarkovData.Containers[container]
+
+            if list and list[index] then
+                local itemID = list[index]
+                list[index] = nil -- Clear slot
+
+                local ent = ents.Create("ent_loot_item")
+                ent:SetPos(ply:GetShootPos() + ply:GetAimVector() * 50)
+                ent:SetAngles(Angle(0, ply:EyeAngles().y, 0))
+                ent:DefineItem(itemID)
+                ent:Spawn()
+
+                SyncInventory(ply)
+            end
 
         elseif action == "quick_move" then
             local container = net.ReadString()
@@ -287,33 +315,6 @@ if SERVER then
                 end
             end
         end
-
-        ply:ChatPrint("[Inventory] No space in Pockets/Rig/Backpack!")
-        return false
-    end
-
-    -- Action Handler
-    net.Receive(TAG .. "_Action", function(len, ply)
-        EnsureProfile(ply)
-        local action = net.ReadString()
-
-        if action == "drop" then
-            local container = net.ReadString()
-            local index = net.ReadUInt(8)
-            local list = ply.TarkovData.Containers[container]
-
-            if list and list[index] then
-                local itemID = list[index]
-                list[index] = nil -- Clear slot
-
-                local ent = ents.Create("ent_loot_item")
-                ent:SetPos(ply:GetShootPos() + ply:GetAimVector() * 50)
-                ent:SetAngles(Angle(0, ply:EyeAngles().y, 0))
-                ent:DefineItem(itemID)
-                ent:Spawn()
-
-                SyncInventory(ply)
-            end
 
         elseif action == "move" then
             local fromCont = net.ReadString()
@@ -567,19 +568,20 @@ if CLIENT then
 
                 local baseMousePressed = model.OnMousePressed
                 model.OnMousePressed = function(s, code)
-                    if code == MOUSE_RIGHT and onClick then
-                        onClick()
-                        return
-                    end
-                    -- Ctrl+Click Logic
-                    if code == MOUSE_LEFT and input.IsKeyDown(KEY_LCONTROL) then
-                        if draggableData then -- draggableData contains { Container = "...", Index = ... }
-                             net.Start(TAG .. "_Action")
-                             net.WriteString("quick_move")
-                             net.WriteString(draggableData.Container)
-                             net.WriteUInt(draggableData.Index, 8)
-                             net.SendToServer()
-                             return
+                    if code == MOUSE_RIGHT then
+                        if input.IsKeyDown(KEY_LCONTROL) then
+                             -- Quick Move Logic
+                             if draggableData then
+                                 net.Start(TAG .. "_Action")
+                                 net.WriteString("quick_move")
+                                 net.WriteString(draggableData.Container)
+                                 net.WriteUInt(draggableData.Index, 8)
+                                 net.SendToServer()
+                                 return
+                             end
+                        elseif onClick then
+                            onClick()
+                            return
                         end
                     end
                     if baseMousePressed then baseMousePressed(s, code) end
@@ -822,6 +824,15 @@ if CLIENT then
     hook.Add("OnPlayerChat", "ChatInv", function(ply, text) if text=="/bag" then if ply==LocalPlayer() then OpenInventory() end return true end end)
     hook.Add("KeyPress", "TarkovLootPickup", function(ply, key)
         if key == IN_USE and IsFirstTimePredicted() then
+            -- NEW: Close Inventory if Open
+            if IsValid(invFrame) then
+                 CloseDermaMenus()
+                 invFrame:Close()
+                 invFrame = nil
+                 if IsValid(cacheFrame) then cacheFrame:Remove() cacheFrame = nil end
+                 return
+            end
+
             local tr = util.TraceHull({start=ply:GetShootPos(),endpos=ply:GetShootPos()+ply:GetAimVector()*100,mins=Vector(-10,-10,-10),maxs=Vector(10,10,10),filter=ply})
             if IsValid(tr.Entity) and tr.Entity.IsTarkovLoot then net.Start(TAG.."_Pickup"); net.WriteEntity(tr.Entity); net.SendToServer() end
         end
