@@ -83,6 +83,11 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
 
     local class = ent:GetClass()
 
+    -- EXPLICIT IGNORE: Do not treat loose items as containers
+    if class == "ent_loot_item" or string.sub(class, 1, 9) == "ent_item_" then
+        return
+    end
+
     -- Check cache first
     if CLASS_CACHE[class] == false then return end
     if CLASS_CACHE[class] == true then
