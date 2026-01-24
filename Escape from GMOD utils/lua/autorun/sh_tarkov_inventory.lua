@@ -613,16 +613,6 @@ if CLIENT then
             invFrame:MakePopup()
             invFrame:ShowCloseButton(true)
 
-            -- Handle 'E' to Close
-            invFrame.OnKeyCodePressed = function(self, code)
-                if code == KEY_E then
-                     if IsCacheOpen and (CurTime() < CacheOpenedAt + 1.0) then
-                          return
-                     end
-                     OpenInventory()
-                end
-            end
-
             -- Cleanup callback
             invFrame.OnRemove = function()
                 CloseDermaMenus()
@@ -824,10 +814,13 @@ if CLIENT then
         end
     end
 
-    local wasPressed = false
+    local wasPressedI = false
+    local wasPressedE = false
+
     hook.Add("Think", "ToggleInv", function()
+        -- TOGGLE WITH I
         if input.IsButtonDown(KEY_I) then
-            if not wasPressed then
+            if not wasPressedI then
                 local focus = vgui.GetKeyboardFocus()
                 if not (IsValid(focus) and focus:GetClassName() == "TextEntry") and not gui.IsGameUIVisible() then
                     if IsValid(invFrame) then
@@ -840,9 +833,28 @@ if CLIENT then
                         OpenInventory()
                     end
                 end
-                wasPressed = true
+                wasPressedI = true
             end
-        else wasPressed = false end
+        else wasPressedI = false end
+
+        -- CLOSE WITH E
+        if input.IsButtonDown(KEY_E) then
+            if not wasPressedE then
+                local focus = vgui.GetKeyboardFocus()
+                if not (IsValid(focus) and focus:GetClassName() == "TextEntry") then
+                    if IsValid(invFrame) and IsCacheOpen then
+                        if CurTime() > CacheOpenedAt + 1.0 then
+                            CloseDermaMenus()
+                            invFrame.OnRemove = nil
+                            invFrame:Remove()
+                            invFrame = nil
+                            if IsValid(cacheFrame) then cacheFrame:Remove() cacheFrame = nil end
+                        end
+                    end
+                end
+                wasPressedE = true
+            end
+        else wasPressedE = false end
     end)
 
     hook.Add("OnPlayerChat", "ChatInv", function(ply, text) if text=="/bag" then if ply==LocalPlayer() then OpenInventory() end return true end end)
@@ -875,7 +887,19 @@ if SERVER then
         self:PhysicsInit(SOLID_VPHYSICS); self:SetMoveType(MOVETYPE_VPHYSICS); self:SetSolid(SOLID_VPHYSICS); self:SetUseType(SIMPLE_USE); self:SetCollisionGroup(COLLISION_GROUP_WEAPON)
         local phys = self:GetPhysicsObject(); if IsValid(phys) then phys:Wake() end end
     end
-    function ENT_ITEM:Use(activator) end -- Manual pickup override
+    function ENT_ITEM:Use(activator)
+        if IsValid(activator) and activator:IsPlayer() then
+             local id = self:GetNWString("ItemID", "")
+             if id ~= "" then
+                  local res = AddItemToInventory(activator, id)
+                  if res then
+                      activator:EmitSound("items/ammo_pickup.wav")
+                      activator:ChatPrint("Picked up: " .. (ITEMS[id].Name or id))
+                      self:Remove()
+                  end
+             end
+        end
+    end
 end
 if CLIENT then
     function ENT_ITEM:Draw() self:DrawModel() end
