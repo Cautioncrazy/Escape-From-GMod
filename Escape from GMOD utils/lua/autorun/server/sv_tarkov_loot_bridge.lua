@@ -68,8 +68,11 @@ local function BuildLootPools()
             table.insert(LOOT_POOLS["ammo"], id)
         end
 
-        if data.Type == "equip" and not (string.find(lId, "weapon")) then
-            table.insert(LOOT_POOLS["gear"], id)
+        -- Gear: Prioritize items with Capacity (Backpacks/Rigs) or Armor
+        if data.Type == "equip" and not string.find(lId, "weapon") then
+            if (data.Capacity and data.Capacity > 0) or data.Slot == "Armor" or data.Slot == "Rig" or data.Slot == "Backpack" then
+                table.insert(LOOT_POOLS["gear"], id)
+            end
         end
 
         if data.Type == "item" then
