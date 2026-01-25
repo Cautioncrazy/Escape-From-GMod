@@ -478,8 +478,21 @@ if SERVER then
             if itemList and itemList[index] then
                 local itemID = itemList[index]
                 local itemData = ITEMS[itemID]
-                if itemData.Type == "item" then
-                    local used = false
+
+                -- Support using ANY item if it maps to a scripted entity (like ammo)
+                -- or if it is a consumable defined below
+                local used = false
+
+                -- 1. Try generic entity usage (Ammo, Weapons, etc.)
+                local entTable = scripted_ents.Get(itemID)
+                if entTable then
+                    -- Give the entity to the player (standard GMod behavior for ammo/weps)
+                    ply:Give(itemID)
+                    used = true
+                end
+
+                -- 2. Try hardcoded consumables
+                if not used and itemData and itemData.Type == "item" then
                     if itemID == "tushonka" then
                         ply:SetHealth(math.min(ply:Health() + 25, ply:GetMaxHealth()))
                         ply:EmitSound("npc/barnacle/barnacle_crunch2.wav")
@@ -489,10 +502,11 @@ if SERVER then
                         ply:EmitSound("items/medshot4.wav")
                         used = true
                     end
-                    if used then
-                        itemList[index] = nil
-                        SyncInventory(ply)
-                    end
+                end
+
+                if used then
+                    itemList[index] = nil
+                    SyncInventory(ply)
                 end
             end
         end
