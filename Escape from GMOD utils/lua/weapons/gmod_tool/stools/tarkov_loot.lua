@@ -24,6 +24,32 @@ local CACHE_CLASSES = {
     ["ent_loot_cache_tarkov"] = true
 }
 
+-- Helper: Determine if an entity is a valid loot container
+-- This matches the logic in the Bridge script + the explicit list + flags
+local function IsValidLootCache(ent)
+    if not IsValid(ent) then return false end
+
+    local class = ent:GetClass()
+
+    -- 1. Exclude loose items and pickup entities
+    if class == "ent_loot_item" then return false end
+    if string.sub(class, 1, 9) == "ent_item_" then return false end
+
+    -- 2. Check Whitelist
+    if CACHE_CLASSES[class] then return true end
+
+    -- 3. Check Internal Flag
+    if ent.IsTarkovLoot then return true end
+
+    -- 4. Check Name Pattern (Matches sv_tarkov_loot_bridge.lua logic)
+    -- This ensures we catch workshop entities that aren't in our hardcoded list
+    if string.find(class, "loot") or string.find(class, "cache") or string.find(class, "crate") then
+        return true
+    end
+
+    return false
+end
+
 function TOOL:LeftClick(trace)
     if CLIENT then return true end
 
@@ -36,16 +62,18 @@ function TOOL:LeftClick(trace)
         local data = {}
         local count = 0
 
-        for class, _ in pairs(CACHE_CLASSES) do
-            local caches = ents.FindByClass(class)
-            for _, ent in ipairs(caches) do
+        -- SCAN ALL ENTITIES
+        for _, ent in ipairs(ents.GetAll()) do
+            if IsValidLootCache(ent) then
                 table.insert(data, {
                     pos = ent:GetPos(),
                     ang = ent:GetAngles(),
                     pool = ent:GetNWString("LootPool", "random"),
-                    class = class -- Save class so we know what to respawn
+                    class = ent:GetClass()
                 })
                 count = count + 1
+                -- Debug print to verify
+                -- print("[Tarkov Loot] Found: " .. ent:GetClass())
             end
         end
 
@@ -64,7 +92,7 @@ function TOOL:LeftClick(trace)
     elseif mode == "tag" then
         -- TAG LOGIC
         local ent = trace.Entity
-        if IsValid(ent) and CACHE_CLASSES[ent:GetClass()] then
+        if IsValidLootCache(ent) then
             local pool = self:GetClientInfo("pool")
             ent:SetNWString("LootPool", pool)
 
@@ -85,7 +113,7 @@ function TOOL:RightClick(trace)
 
     -- Copy Tag from entity (Eyedropper function)
     local ent = trace.Entity
-    if IsValid(ent) and CACHE_CLASSES[ent:GetClass()] then
+    if IsValidLootCache(ent) then
         local pool = ent:GetNWString("LootPool", "random")
         self:GetOwner():ConCommand("tarkov_loot_pool " .. pool) -- Update client var
         self:GetOwner():ChatPrint("[Tarkov Loot] Copied tag: " .. pool)
@@ -140,9 +168,9 @@ function TOOL:DrawHUD()
         local ent = tr.Entity
 
         -- Check if looking at a valid cache
-        -- Note: CACHE_CLASSES needs to be available on client.
-        -- Since this is a shared file (TOOL), the local CACHE_CLASSES defined at top is available on client too!
-        if IsValid(ent) and CACHE_CLASSES[ent:GetClass()] then
+        -- Note: We duplicate the logic slightly for CLIENT side since IsValidLootCache is local to this file
+        -- But since this file is shared, the function exists on client too!
+        if IsValidLootCache(ent) then
 
             -- Draw Halo
             halo.Add({ent}, Color(0, 255, 0), 2, 2, 1, true, true)
