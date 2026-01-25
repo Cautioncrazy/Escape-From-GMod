@@ -19,96 +19,20 @@ local CACHE_ENTITIES = {
     ["ent_loot_cache_tarkov"] = true -- Added our custom test entity just in case
 }
 
--- LOOT TABLES (Will be rebuilt dynamically)
+-- LOOT TABLES (Simple list of item IDs from sh_tarkov_inventory.lua)
+-- You can expand this list with more specific items
 local LOOT_POOLS = {
-    ["weapons"] = {},
-    ["medical"] = {},
-    ["misc"] = {},
-    ["rare"] = {},
-    ["gear"] = {},
-    ["ammo"] = {},
-    ["random"] = {}
+    ["weapons"] = {"weapon_pistol", "weapon_smg1", "medkit"},
+    ["medical"] = {"medkit", "medkit", "tushonka"},
+    ["misc"] = {"scrap", "tushonka", "backpack_scav"},
+    ["rare"] = {"bitcoin", "weapon_smg1", "rig_combine"},
+    ["random"] = {"tushonka", "medkit", "bitcoin", "weapon_pistol", "backpack_scav", "scrap", "rig_combine"}
 }
-
--- DYNAMIC LOOT POOL GENERATION
-local function BuildLootPools()
-    -- Get All Items from shared registry
-    local allItems = GetAllTarkovItems()
-
-    -- Reset Pools
-    LOOT_POOLS = {
-        ["weapons"] = {},
-        ["medical"] = {},
-        ["misc"] = {},
-        ["rare"] = {},
-        ["gear"] = {},
-        ["ammo"] = {},
-        ["random"] = {}
-    }
-
-    local count = 0
-    for id, data in pairs(allItems) do
-        count = count + 1
-        table.insert(LOOT_POOLS["random"], id)
-
-        local lId = string.lower(id)
-        local lDesc = string.lower(data.Desc or "")
-        local lName = string.lower(data.Name or "")
-
-        -- Categorize based on ID, Type, or Description
-        if data.Slot == "Primary" or data.Slot == "Secondary" or string.find(lId, "weapon") then
-            table.insert(LOOT_POOLS["weapons"], id)
-        end
-
-        if string.find(lId, "med") or string.find(lId, "health") or string.find(lName, "med") then
-            table.insert(LOOT_POOLS["medical"], id)
-        end
-
-        if string.find(lId, "ammo") or string.find(lDesc, "ammo") then
-            table.insert(LOOT_POOLS["ammo"], id)
-        end
-
-        if data.Type == "equip" and not (string.find(lId, "weapon")) then
-            table.insert(LOOT_POOLS["gear"], id)
-        end
-
-        if data.Type == "item" then
-            table.insert(LOOT_POOLS["misc"], id)
-        end
-
-        if string.find(lId, "bitcoin") or string.find(lId, "gold") or string.find(lDesc, "rare") then
-            table.insert(LOOT_POOLS["rare"], id)
-        end
-    end
-
-    -- Fallback safety
-    if #LOOT_POOLS["random"] == 0 then
-        table.insert(LOOT_POOLS["random"], "tushonka")
-    end
-
-    print("[Tarkov Bridge] Built loot pools with " .. count .. " items.")
-end
-
--- Rebuild pools after entities load (so dynamic items are registered)
-hook.Add("InitPostEntity", "TarkovBuildPools", function()
-    timer.Simple(2, function() -- Slight delay to ensure shared script ran
-        BuildLootPools()
-    end)
-end)
 
 -- Helper to get random item from pool
 local function GetRandomItem(poolName)
-    local pool = LOOT_POOLS[poolName]
-    -- Fallback to random if pool is empty or invalid
-    if not pool or #pool == 0 then
-        pool = LOOT_POOLS["random"]
-    end
-
-    if #pool > 0 then
-        return pool[math.random(#pool)]
-    else
-        return "tushonka" -- Ultimate fallback
-    end
+    local pool = LOOT_POOLS[poolName] or LOOT_POOLS["random"]
+    return pool[math.random(#pool)]
 end
 
 -- Helper to open the loot interface (generates loot if needed)
@@ -128,6 +52,7 @@ local function OpenLootCache(ply, ent)
                 ent.CacheInventory[slot] = item
             end
         end
+        -- print("[Tarkov Bridge] Generated loot for box.")
     end
 
     -- 4. OPEN INVENTORY MENU
@@ -228,51 +153,3 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
     -- (e.g. stop the workshop addon from opening its own menu)
     return false
 end)
-
--- --- DATA PERSISTENCE ---
--- Loads saved loot cache configurations (Pools) on map start
-local function LoadLootData()
-    local mapName = game.GetMap()
-    if file.Exists("tarkov_data/" .. mapName .. ".json", "DATA") then
-        local json = file.Read("tarkov_data/" .. mapName .. ".json", "DATA")
-        local data = util.JSONToTable(json)
-
-        if data then
-            print("[Tarkov Loot] Loading " .. #data .. " loot caches...")
-            for _, entry in ipairs(data) do
-                -- Try to find existing entity first (for map props)
-                local found = false
-                local nearby = ents.FindInSphere(entry.pos, 5)
-                for _, ent in ipairs(nearby) do
-                    if ent:GetClass() == (entry.class or "ent_loot_cache") then -- Only match if class matches (or default)
-                        ent:SetNWString("LootPool", entry.pool)
-                        -- Force update pos/ang just in case
-                        ent:SetPos(entry.pos)
-                        ent:SetAngles(entry.ang)
-                        found = true
-                        break
-                    end
-                end
-
-                -- If not found (it was a spawned entity), respawn it
-                if not found then
-                    local ent = ents.Create(entry.class or "ent_loot_cache")
-                    if IsValid(ent) then
-                        ent:SetPos(entry.pos)
-                        ent:SetAngles(entry.ang)
-                        ent:Spawn()
-                        ent:SetNWString("LootPool", entry.pool)
-                        -- Ensure it doesn't fall through world if physics sleep
-                        local phys = ent:GetPhysicsObject()
-                        if IsValid(phys) then phys:EnableMotion(false) end
-                    end
-                end
-            end
-        end
-    else
-        print("[Tarkov Loot] No saved data for map: " .. mapName)
-    end
-end
-
-hook.Add("InitPostEntity", "TarkovLoadLoot", LoadLootData)
-hook.Add("PostCleanupMap", "TarkovLoadLootClean", LoadLootData)
