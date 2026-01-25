@@ -115,11 +115,24 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
             if wep.Spawnable and wep.PrintName then
                 local id = wep.ClassName
                 if not ITEMS[id] then
-                    -- FIX: Ensure a valid model exists, even if the weapon definition is incomplete
-                    local mdl = wep.WorldModel
+                    -- Get the truest definition we can find
+                    local stored = weapons.GetStored(id) or wep
+
+                    -- FIX: Ensure a valid model exists, using common addon fields
+                    local mdl = stored.WorldModel
+                    if not mdl or mdl == "" then mdl = stored.WM end -- ArcCW/TFA
+                    if not mdl or mdl == "" then mdl = stored.ViewModel end -- Last resort
+
+                    -- Fallback to list entry if stored failed
+                    if not mdl or mdl == "" then mdl = wep.WorldModel end
+                    if not mdl or mdl == "" then mdl = wep.ViewModel end
+
+                    -- Sanity check for error model
                     if not mdl or mdl == "" or mdl == "models/error.mdl" then
                         mdl = "models/weapons/w_rif_ak47.mdl" -- Fallback generic weapon
                     end
+
+                    -- print("[Tarkov Inv] Registered " .. id .. " with model: " .. mdl)
 
                     RegisterItem(id, {
                         Name = wep.PrintName,
