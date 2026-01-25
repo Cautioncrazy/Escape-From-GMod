@@ -134,12 +134,22 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
 
                     -- print("[Tarkov Inv] Registered " .. id .. " with model: " .. mdl)
 
+                    -- DETERMINE SLOT: Primary, Secondary, Melee, or Grenade
+                    local slot = "Primary"
+                    if wep.Slot == 0 or wep.HoldType == "melee" or wep.HoldType == "knife" then
+                        slot = "Melee"
+                    elseif wep.Slot == 1 then
+                        slot = "Secondary"
+                    elseif wep.Slot == 4 or wep.HoldType == "grenade" or wep.HoldType == "slam" then
+                        slot = "Grenade"
+                    end
+
                     RegisterItem(id, {
                         Name = wep.PrintName,
                         Desc = "Weapon: " .. (wep.Category or "Unknown"),
                         Model = mdl,
                         Type = "equip",
-                        Slot = (wep.Slot == 0 or wep.Slot == 1) and "Secondary" or "Primary",
+                        Slot = slot,
                         Weight = 2.0
                     })
                 end
@@ -257,8 +267,8 @@ if SERVER then
             if not ply.TarkovData.Equipment[itemData.Slot] then
                 ply.TarkovData.Equipment[itemData.Slot] = itemId
 
-                -- FIX: Use slot type
-                if itemData.Slot == "Primary" or itemData.Slot == "Secondary" then
+                -- FIX: Use slot type (include Melee/Grenade)
+                if itemData.Slot == "Primary" or itemData.Slot == "Secondary" or itemData.Slot == "Melee" or itemData.Slot == "Grenade" then
                     ply:Give(itemId)
                     ply:SelectWeapon(itemId)
                 elseif itemData.Slot == "Armor" and itemId == "armor_hev" then
@@ -361,25 +371,55 @@ if SERVER then
             local itemData = ITEMS[itemID]
 
             if itemData and itemData.Type == "equip" then
-                if not ply.TarkovData.Equipment[itemData.Slot] then
-                    ply.TarkovData.Containers[container][index] = nil
-                    ply.TarkovData.Equipment[itemData.Slot] = itemID
+                local targetSlot = itemData.Slot
 
-                    -- FIX: Use slot type to determine if it's a weapon, not string matching
-                    if itemData.Slot == "Primary" or itemData.Slot == "Secondary" then
-                        ply:Give(itemID)
-                        ply:SelectWeapon(itemID) -- Raise it immediately
-                    elseif itemData.Slot == "Armor" and itemID == "armor_hev" then
-                        ply:EquipSuit()
-                        ply:SetArmor(100)
+                -- Check if slot is occupied (SWAP LOGIC)
+                if ply.TarkovData.Equipment[targetSlot] then
+                    local oldItemID = ply.TarkovData.Equipment[targetSlot]
+                    -- Attempt to move old item to inventory (swap)
+                    -- Note: We use AddItemToInventory but we must ensure it doesn't just re-equip it!
+                    -- We manually check space.
+
+                    -- Simple check: Is there space in the container we are taking from? (1:1 swap)
+                    -- Actually, AddItemToInventory searches all containers.
+                    -- But to avoid infinite recursion or complex state, we'll try to add it.
+                    -- We clear the equipment slot temporarily to allow the add? No.
+
+                    -- Attempt to add old item to storage
+                    if AddItemToInventory(ply, oldItemID) then
+                        -- If successful, unequip logic for old item
+                        local oldData = ITEMS[oldItemID]
+                        if oldData and (oldData.Slot == "Primary" or oldData.Slot == "Secondary" or oldData.Slot == "Melee" or oldData.Slot == "Grenade") then
+                            ply:StripWeapon(oldItemID)
+                        elseif oldItemID == "armor_hev" then
+                            ply:RemoveSuit(); ply:SetArmor(0)
+                        end
+                        if targetSlot == "Backpack" then ply:SetNWString("TarkovBackpack", "") end
+
+                        -- Now slot is technically empty in data (AddItemToInventory might have put it in a container)
+                        -- Proceed to equip NEW item
+                        ply.TarkovData.Equipment[targetSlot] = nil -- Ensure clean state
+                    else
+                        ply:ChatPrint("No space to swap item!")
+                        return
                     end
-
-                    if itemData.Slot == "Backpack" then ply:SetNWString("TarkovBackpack", itemData.Model) end
-
-                    SyncInventory(ply)
-                else
-                    ply:ChatPrint("Slot " .. itemData.Slot .. " is occupied!")
                 end
+
+                -- EQUIP NEW ITEM
+                ply.TarkovData.Containers[container][index] = nil
+                ply.TarkovData.Equipment[targetSlot] = itemID
+
+                if targetSlot == "Primary" or targetSlot == "Secondary" or targetSlot == "Melee" or targetSlot == "Grenade" then
+                    ply:Give(itemID)
+                    ply:SelectWeapon(itemID)
+                elseif targetSlot == "Armor" and itemID == "armor_hev" then
+                    ply:EquipSuit()
+                    ply:SetArmor(100)
+                end
+
+                if targetSlot == "Backpack" then ply:SetNWString("TarkovBackpack", itemData.Model) end
+
+                SyncInventory(ply)
             end
 
         elseif action == "unequip" then
@@ -391,7 +431,7 @@ if SERVER then
                     ply.TarkovData.Equipment[slot] = nil
 
                     -- FIX: Use slot type
-                    if itemData and (itemData.Slot == "Primary" or itemData.Slot == "Secondary") then
+                    if itemData and (itemData.Slot == "Primary" or itemData.Slot == "Secondary" or itemData.Slot == "Melee" or itemData.Slot == "Grenade") then
                         ply:StripWeapon(itemID)
                     elseif itemID == "armor_hev" then
                         ply:RemoveSuit()
@@ -417,8 +457,12 @@ if SERVER then
                     ply.TarkovData.Equipment[slot] = nil
                     toList[toIdx] = itemID
 
-                    if string.sub(itemID, 1, 6) == "weapon" then ply:StripWeapon(itemID)
-                    elseif itemID == "armor_hev" then ply:RemoveSuit(); ply:SetArmor(0) end
+                    local itemData = ITEMS[itemID]
+                    if itemData and (itemData.Slot == "Primary" or itemData.Slot == "Secondary" or itemData.Slot == "Melee" or itemData.Slot == "Grenade") then
+                        ply:StripWeapon(itemID)
+                    elseif itemID == "armor_hev" then
+                        ply:RemoveSuit(); ply:SetArmor(0)
+                    end
                     if slot == "Backpack" then ply:SetNWString("TarkovBackpack", "") end
 
                     SyncInventory(ply)
@@ -447,8 +491,8 @@ if SERVER then
                             ply.TarkovData.Containers[container][index] = nil
                             ply.TarkovData.Equipment[itemData.Slot] = itemID
 
-                            -- FIX: Use slot type
-                            if itemData.Slot == "Primary" or itemData.Slot == "Secondary" then
+                            -- FIX: Use slot type (include Melee/Grenade)
+                            if itemData.Slot == "Primary" or itemData.Slot == "Secondary" or itemData.Slot == "Melee" or itemData.Slot == "Grenade" then
                                 ply:Give(itemID)
                                 ply:SelectWeapon(itemID)
                             elseif itemData.Slot == "Armor" and itemID == "armor_hev" then
@@ -473,7 +517,7 @@ if SERVER then
                 ply.TarkovData.Equipment[slot] = nil
 
                 -- FIX: Use slot type
-                if itemData and (itemData.Slot == "Primary" or itemData.Slot == "Secondary") then
+                if itemData and (itemData.Slot == "Primary" or itemData.Slot == "Secondary" or itemData.Slot == "Melee" or itemData.Slot == "Grenade") then
                     ply:StripWeapon(itemID)
                 elseif itemID == "armor_hev" then
                     ply:RemoveSuit()
@@ -785,7 +829,17 @@ if CLIENT then
         -- Cleanup Right Panel
         rightPanel:Clear()
 
-        local slots = { {name="Head",x=110,y=10}, {name="Armor",x=110,y=80}, {name="Primary",x=10,y=200,w=120,h=60}, {name="Secondary",x=170,y=200,w=120,h=60}, {name="Rig",x=10,y=300,w=80,h=80}, {name="Backpack",x=210,y=300,w=80,h=80} }
+        -- Updated slots layout to include Grenade and Melee
+        local slots = {
+            {name="Head",x=110,y=10},
+            {name="Armor",x=110,y=80},
+            {name="Primary",x=10,y=200,w=120,h=60},
+            {name="Secondary",x=170,y=200,w=120,h=60},
+            {name="Melee",x=300,y=200,w=80,h=60}, -- New Melee Slot
+            {name="Grenade",x=300,y=270,w=60,h=60}, -- New Grenade Slot
+            {name="Rig",x=10,y=300,w=80,h=80},
+            {name="Backpack",x=210,y=300,w=80,h=80}
+        }
         for _, slotInfo in ipairs(slots) do
             local w,h = slotInfo.w or 80, slotInfo.h or 80
             local itemID = LocalData.Equipment[slotInfo.name]
