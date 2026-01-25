@@ -91,7 +91,8 @@ end
 
 -- Rebuild pools after entities load (so dynamic items are registered)
 hook.Add("InitPostEntity", "TarkovBuildPools", function()
-    timer.Simple(2, function() -- Slight delay to ensure shared script ran
+    -- MUST RUN AFTER sh_tarkov_inventory's 3-second timer
+    timer.Simple(5, function()
         BuildLootPools()
     end)
 end)
@@ -274,5 +275,10 @@ local function LoadLootData()
     end
 end
 
-hook.Add("InitPostEntity", "TarkovLoadLoot", LoadLootData)
-hook.Add("PostCleanupMap", "TarkovLoadLootClean", LoadLootData)
+-- DELAYED LOADING: Wait for other addons (like workshop map props) to spawn
+hook.Add("InitPostEntity", "TarkovLoadLoot", function()
+    timer.Simple(5, LoadLootData)
+end)
+hook.Add("PostCleanupMap", "TarkovLoadLootClean", function()
+    timer.Simple(5, LoadLootData)
+end)
