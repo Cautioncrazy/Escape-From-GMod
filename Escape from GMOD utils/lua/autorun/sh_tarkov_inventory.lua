@@ -108,38 +108,48 @@ RegisterItem("bitcoin", {
 
 -- --- 4. DYNAMIC LOOT GENERATION (NEW) ---
 hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
-    -- Scan for Spawnable Weapons
-    for _, wep in pairs(list.Get("Weapon")) do
-        if wep.Spawnable and wep.WorldModel and wep.PrintName then
-            local id = wep.ClassName
-            if not ITEMS[id] then
-                RegisterItem(id, {
-                    Name = wep.PrintName,
-                    Desc = "Weapon: " .. (wep.Category or "Unknown"),
-                    Model = wep.WorldModel,
-                    Type = "equip",
-                    Slot = (wep.Slot == 0 or wep.Slot == 1) and "Secondary" or "Primary",
-                    Weight = 2.0
+    -- Delay generation to ensure all weapons (client & server) are fully registered
+    timer.Simple(3, function()
+        -- Scan for Spawnable Weapons
+        for _, wep in pairs(list.Get("Weapon")) do
+            if wep.Spawnable and wep.PrintName then
+                local id = wep.ClassName
+                if not ITEMS[id] then
+                    -- FIX: Ensure a valid model exists, even if the weapon definition is incomplete
+                    local mdl = wep.WorldModel
+                    if not mdl or mdl == "" or mdl == "models/error.mdl" then
+                        mdl = "models/weapons/w_rif_ak47.mdl" -- Fallback generic weapon
+                    end
+
+                    RegisterItem(id, {
+                        Name = wep.PrintName,
+                        Desc = "Weapon: " .. (wep.Category or "Unknown"),
+                        Model = mdl,
+                        Type = "equip",
+                        Slot = (wep.Slot == 0 or wep.Slot == 1) and "Secondary" or "Primary",
+                        Weight = 2.0
+                    })
+                end
+            end
+        end
+
+        -- Scan for Spawnable Entities (Simple Props logic)
+        for class, entData in pairs(scripted_ents.GetList()) do
+            local t = entData.t
+            if t.Spawnable and t.PrintName and not ITEMS[class] then
+                -- Fallback model since many scripted ents don't define WorldModel strictly
+                local model = "models/props_junk/cardboard_box004a.mdl"
+                RegisterItem(class, {
+                    Name = t.PrintName,
+                    Desc = "Item: " .. (t.Category or "Misc"),
+                    Model = model,
+                    Type = "item",
+                    Weight = 1.0
                 })
             end
         end
-    end
-
-    -- Scan for Spawnable Entities (Simple Props logic)
-    for class, entData in pairs(scripted_ents.GetList()) do
-        local t = entData.t
-        if t.Spawnable and t.PrintName and not ITEMS[class] then
-            -- Fallback model since many scripted ents don't define WorldModel strictly
-            local model = "models/props_junk/cardboard_box004a.mdl"
-            RegisterItem(class, {
-                Name = t.PrintName,
-                Desc = "Item: " .. (t.Category or "Misc"),
-                Model = model,
-                Type = "item",
-                Weight = 1.0
-            })
-        end
-    end
+        print("[Tarkov Inv] Generated dynamic items.")
+    end)
 end)
 
 -- --- 2. SERVER SIDE LOGIC ---
@@ -228,8 +238,15 @@ if SERVER then
             if not ply.TarkovData.Equipment[itemData.Slot] then
                 ply.TarkovData.Equipment[itemData.Slot] = itemId
 
-                if string.sub(itemId, 1, 6) == "weapon" then ply:Give(itemId)
-                elseif itemId == "armor_hev" then ply:EquipSuit(); ply:SetArmor(100) end
+                -- FIX: Use slot type
+                if itemData.Slot == "Primary" or itemData.Slot == "Secondary" then
+                    ply:Give(itemId)
+                    ply:SelectWeapon(itemId)
+                elseif itemData.Slot == "Armor" and itemId == "armor_hev" then
+                    ply:EquipSuit()
+                    ply:SetArmor(100)
+                end
+
                 if itemData.Slot == "Backpack" then ply:SetNWString("TarkovBackpack", itemData.Model) end
 
                 ply:ChatPrint("[Inventory] Auto-Equipped " .. itemData.Name)
@@ -329,8 +346,15 @@ if SERVER then
                     ply.TarkovData.Containers[container][index] = nil
                     ply.TarkovData.Equipment[itemData.Slot] = itemID
 
-                    if string.sub(itemID, 1, 6) == "weapon" then ply:Give(itemID)
-                    elseif itemID == "armor_hev" then ply:EquipSuit(); ply:SetArmor(100) end
+                    -- FIX: Use slot type to determine if it's a weapon, not string matching
+                    if itemData.Slot == "Primary" or itemData.Slot == "Secondary" then
+                        ply:Give(itemID)
+                        ply:SelectWeapon(itemID) -- Raise it immediately
+                    elseif itemData.Slot == "Armor" and itemID == "armor_hev" then
+                        ply:EquipSuit()
+                        ply:SetArmor(100)
+                    end
+
                     if itemData.Slot == "Backpack" then ply:SetNWString("TarkovBackpack", itemData.Model) end
 
                     SyncInventory(ply)
@@ -343,10 +367,18 @@ if SERVER then
             local slot = net.ReadString()
             local itemID = ply.TarkovData.Equipment[slot]
             if itemID then
+                local itemData = ITEMS[itemID]
                 if AddItemToInventory(ply, itemID) then
                     ply.TarkovData.Equipment[slot] = nil
-                    if string.sub(itemID, 1, 6) == "weapon" then ply:StripWeapon(itemID)
-                    elseif itemID == "armor_hev" then ply:RemoveSuit(); ply:SetArmor(0) end
+
+                    -- FIX: Use slot type
+                    if itemData and (itemData.Slot == "Primary" or itemData.Slot == "Secondary") then
+                        ply:StripWeapon(itemID)
+                    elseif itemID == "armor_hev" then
+                        ply:RemoveSuit()
+                        ply:SetArmor(0)
+                    end
+
                     if slot == "Backpack" then ply:SetNWString("TarkovBackpack", "") end
                     SyncInventory(ply)
                 end
@@ -396,8 +428,14 @@ if SERVER then
                             ply.TarkovData.Containers[container][index] = nil
                             ply.TarkovData.Equipment[itemData.Slot] = itemID
 
-                            if string.sub(itemID, 1, 6) == "weapon" then ply:Give(itemID)
-                            elseif itemID == "armor_hev" then ply:EquipSuit(); ply:SetArmor(100) end
+                            -- FIX: Use slot type
+                            if itemData.Slot == "Primary" or itemData.Slot == "Secondary" then
+                                ply:Give(itemID)
+                                ply:SelectWeapon(itemID)
+                            elseif itemData.Slot == "Armor" and itemID == "armor_hev" then
+                                ply:EquipSuit()
+                                ply:SetArmor(100)
+                            end
                             if itemData.Slot == "Backpack" then ply:SetNWString("TarkovBackpack", itemData.Model) end
 
                             SyncInventory(ply)
@@ -412,9 +450,17 @@ if SERVER then
             local slot = net.ReadString()
             local itemID = ply.TarkovData.Equipment[slot]
             if itemID then
+                local itemData = ITEMS[itemID]
                 ply.TarkovData.Equipment[slot] = nil
-                if string.sub(itemID, 1, 6) == "weapon" then ply:StripWeapon(itemID)
-                elseif itemID == "armor_hev" then ply:RemoveSuit(); ply:SetArmor(0) end
+
+                -- FIX: Use slot type
+                if itemData and (itemData.Slot == "Primary" or itemData.Slot == "Secondary") then
+                    ply:StripWeapon(itemID)
+                elseif itemID == "armor_hev" then
+                    ply:RemoveSuit()
+                    ply:SetArmor(0)
+                end
+
                 if slot == "Backpack" then ply:SetNWString("TarkovBackpack", "") end
 
                 local ent = ents.Create("ent_loot_item")
@@ -432,8 +478,21 @@ if SERVER then
             if itemList and itemList[index] then
                 local itemID = itemList[index]
                 local itemData = ITEMS[itemID]
-                if itemData.Type == "item" then
-                    local used = false
+
+                -- Support using ANY item if it maps to a scripted entity (like ammo)
+                -- or if it is a consumable defined below
+                local used = false
+
+                -- 1. Try generic entity usage (Ammo, Weapons, etc.)
+                local entTable = scripted_ents.Get(itemID)
+                if entTable then
+                    -- Give the entity to the player (standard GMod behavior for ammo/weps)
+                    ply:Give(itemID)
+                    used = true
+                end
+
+                -- 2. Try hardcoded consumables
+                if not used and itemData and itemData.Type == "item" then
                     if itemID == "tushonka" then
                         ply:SetHealth(math.min(ply:Health() + 25, ply:GetMaxHealth()))
                         ply:EmitSound("npc/barnacle/barnacle_crunch2.wav")
@@ -443,10 +502,11 @@ if SERVER then
                         ply:EmitSound("items/medshot4.wav")
                         used = true
                     end
-                    if used then
-                        itemList[index] = nil
-                        SyncInventory(ply)
-                    end
+                end
+
+                if used then
+                    itemList[index] = nil
+                    SyncInventory(ply)
                 end
             end
         end
