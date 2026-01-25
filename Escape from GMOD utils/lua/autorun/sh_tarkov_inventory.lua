@@ -24,6 +24,11 @@ function GetItemData(id)
     return ITEMS[id]
 end
 
+-- ACCESSOR: Allow server to read all registered items
+function GetAllTarkovItems()
+    return ITEMS
+end
+
 -- --- ITEM DEFINITIONS ---
 
 -- 1. GEAR (Containers & Armor)
@@ -103,38 +108,48 @@ RegisterItem("bitcoin", {
 
 -- --- 4. DYNAMIC LOOT GENERATION (NEW) ---
 hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
-    -- Scan for Spawnable Weapons
-    for _, wep in pairs(list.Get("Weapon")) do
-        if wep.Spawnable and wep.WorldModel and wep.PrintName then
-            local id = wep.ClassName
-            if not ITEMS[id] then
-                RegisterItem(id, {
-                    Name = wep.PrintName,
-                    Desc = "Weapon: " .. (wep.Category or "Unknown"),
-                    Model = wep.WorldModel,
-                    Type = "equip",
-                    Slot = (wep.Slot == 0 or wep.Slot == 1) and "Secondary" or "Primary",
-                    Weight = 2.0
+    -- Delay generation to ensure all weapons (client & server) are fully registered
+    timer.Simple(3, function()
+        -- Scan for Spawnable Weapons
+        for _, wep in pairs(list.Get("Weapon")) do
+            if wep.Spawnable and wep.PrintName then
+                local id = wep.ClassName
+                if not ITEMS[id] then
+                    -- FIX: Ensure a valid model exists, even if the weapon definition is incomplete
+                    local mdl = wep.WorldModel
+                    if not mdl or mdl == "" or mdl == "models/error.mdl" then
+                        mdl = "models/weapons/w_rif_ak47.mdl" -- Fallback generic weapon
+                    end
+
+                    RegisterItem(id, {
+                        Name = wep.PrintName,
+                        Desc = "Weapon: " .. (wep.Category or "Unknown"),
+                        Model = mdl,
+                        Type = "equip",
+                        Slot = (wep.Slot == 0 or wep.Slot == 1) and "Secondary" or "Primary",
+                        Weight = 2.0
+                    })
+                end
+            end
+        end
+
+        -- Scan for Spawnable Entities (Simple Props logic)
+        for class, entData in pairs(scripted_ents.GetList()) do
+            local t = entData.t
+            if t.Spawnable and t.PrintName and not ITEMS[class] then
+                -- Fallback model since many scripted ents don't define WorldModel strictly
+                local model = "models/props_junk/cardboard_box004a.mdl"
+                RegisterItem(class, {
+                    Name = t.PrintName,
+                    Desc = "Item: " .. (t.Category or "Misc"),
+                    Model = model,
+                    Type = "item",
+                    Weight = 1.0
                 })
             end
         end
-    end
-
-    -- Scan for Spawnable Entities (Simple Props logic)
-    for class, entData in pairs(scripted_ents.GetList()) do
-        local t = entData.t
-        if t.Spawnable and t.PrintName and not ITEMS[class] then
-            -- Fallback model since many scripted ents don't define WorldModel strictly
-            local model = "models/props_junk/cardboard_box004a.mdl"
-            RegisterItem(class, {
-                Name = t.PrintName,
-                Desc = "Item: " .. (t.Category or "Misc"),
-                Model = model,
-                Type = "item",
-                Weight = 1.0
-            })
-        end
-    end
+        print("[Tarkov Inv] Generated dynamic items.")
+    end)
 end)
 
 -- --- 2. SERVER SIDE LOGIC ---
