@@ -150,8 +150,14 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
         for class, entData in pairs(scripted_ents.GetList()) do
             local t = entData.t
             if t.Spawnable and t.PrintName and not ITEMS[class] then
-                -- Fallback model since many scripted ents don't define WorldModel strictly
-                local model = "models/props_junk/cardboard_box004a.mdl"
+                -- Attempt to find a real model
+                local model = t.Model or t.WorldModel
+
+                -- If invalid or missing, fallback to box
+                if not model or model == "" or model == "models/error.mdl" then
+                    model = "models/props_junk/cardboard_box004a.mdl"
+                end
+
                 RegisterItem(class, {
                     Name = t.PrintName,
                     Desc = "Item: " .. (t.Category or "Misc"),
