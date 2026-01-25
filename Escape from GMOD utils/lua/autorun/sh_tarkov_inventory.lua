@@ -143,6 +143,7 @@ if SERVER then
     util.AddNetworkString(TAG .. "_Action") -- Drop, Equip, Unequip, Use, Move
     util.AddNetworkString(TAG .. "_Pickup") -- Manual Pickup
     util.AddNetworkString(TAG .. "_SearchUI") -- NEW: Search Progress
+    util.AddNetworkString(TAG .. "_Close") -- NEW: Client Request to Stop Looting
 
     -- Ensure data exists (Lazy Init)
     local function EnsureProfile(ply)
@@ -193,6 +194,20 @@ if SERVER then
         return 0
     end
 
+    -- Sync Function (Forward Declaration)
+    local SyncInventory
+
+    -- Helper: Stop Looting Logic
+    local function StopLooting(ply)
+        if IsValid(ply.ActiveLootCache) then
+            -- Save state back to the entity
+            ply.ActiveLootCache.CacheInventory = table.Copy(ply.TarkovData.Containers.cache)
+            ply.ActiveLootCache = nil
+            ply.TarkovData.Containers.cache = {}
+            SyncInventory(ply) -- Send update (IsCacheOpen will be false)
+        end
+    end
+
     -- Helper: Add Item to best available container OR Equip if empty
     function AddItemToInventory(ply, itemId)
         EnsureProfile(ply)
@@ -237,6 +252,23 @@ if SERVER then
         ply:ChatPrint("[Inventory] No space in Pockets/Rig/Backpack!")
         return false
     end
+
+    -- Close Handler
+    net.Receive(TAG .. "_Close", function(len, ply)
+        EnsureProfile(ply)
+        StopLooting(ply)
+    end)
+
+    -- Distance Check Loop
+    hook.Add("Think", "TarkovLootDistanceCheck", function()
+        for _, ply in ipairs(player.GetAll()) do
+            if IsValid(ply.ActiveLootCache) then
+                if ply:GetPos():DistToSqr(ply.ActiveLootCache:GetPos()) > 150*150 then
+                    StopLooting(ply)
+                end
+            end
+        end
+    end)
 
     -- Action Handler
     net.Receive(TAG .. "_Action", function(len, ply)
@@ -435,7 +467,7 @@ if SERVER then
         end
     end)
 
-    function SyncInventory(ply)
+    SyncInventory = function(ply)
         EnsureProfile(ply)
 
         -- Sync Cache: Copy player's cache session back to the entity logic
@@ -824,6 +856,8 @@ if CLIENT then
                 local focus = vgui.GetKeyboardFocus()
                 if not (IsValid(focus) and focus:GetClassName() == "TextEntry") and not gui.IsGameUIVisible() then
                     if IsValid(invFrame) then
+                        -- Close UI Request
+                        if IsCacheOpen then net.Start(TAG.."_Close"); net.SendToServer() end
                         CloseDermaMenus()
                         invFrame.OnRemove = nil
                         invFrame:Remove()
@@ -844,6 +878,9 @@ if CLIENT then
                 if not (IsValid(focus) and focus:GetClassName() == "TextEntry") then
                     if IsValid(invFrame) and IsCacheOpen then
                         if CurTime() > CacheOpenedAt + 1.0 then
+                            -- Close UI Request
+                            net.Start(TAG.."_Close"); net.SendToServer()
+
                             CloseDermaMenus()
                             invFrame.OnRemove = nil
                             invFrame:Remove()
