@@ -238,8 +238,15 @@ if SERVER then
             if not ply.TarkovData.Equipment[itemData.Slot] then
                 ply.TarkovData.Equipment[itemData.Slot] = itemId
 
-                if string.sub(itemId, 1, 6) == "weapon" then ply:Give(itemId)
-                elseif itemId == "armor_hev" then ply:EquipSuit(); ply:SetArmor(100) end
+                -- FIX: Use slot type
+                if itemData.Slot == "Primary" or itemData.Slot == "Secondary" then
+                    ply:Give(itemId)
+                    ply:SelectWeapon(itemId)
+                elseif itemData.Slot == "Armor" and itemId == "armor_hev" then
+                    ply:EquipSuit()
+                    ply:SetArmor(100)
+                end
+
                 if itemData.Slot == "Backpack" then ply:SetNWString("TarkovBackpack", itemData.Model) end
 
                 ply:ChatPrint("[Inventory] Auto-Equipped " .. itemData.Name)
@@ -339,8 +346,15 @@ if SERVER then
                     ply.TarkovData.Containers[container][index] = nil
                     ply.TarkovData.Equipment[itemData.Slot] = itemID
 
-                    if string.sub(itemID, 1, 6) == "weapon" then ply:Give(itemID)
-                    elseif itemID == "armor_hev" then ply:EquipSuit(); ply:SetArmor(100) end
+                    -- FIX: Use slot type to determine if it's a weapon, not string matching
+                    if itemData.Slot == "Primary" or itemData.Slot == "Secondary" then
+                        ply:Give(itemID)
+                        ply:SelectWeapon(itemID) -- Raise it immediately
+                    elseif itemData.Slot == "Armor" and itemID == "armor_hev" then
+                        ply:EquipSuit()
+                        ply:SetArmor(100)
+                    end
+
                     if itemData.Slot == "Backpack" then ply:SetNWString("TarkovBackpack", itemData.Model) end
 
                     SyncInventory(ply)
@@ -353,10 +367,18 @@ if SERVER then
             local slot = net.ReadString()
             local itemID = ply.TarkovData.Equipment[slot]
             if itemID then
+                local itemData = ITEMS[itemID]
                 if AddItemToInventory(ply, itemID) then
                     ply.TarkovData.Equipment[slot] = nil
-                    if string.sub(itemID, 1, 6) == "weapon" then ply:StripWeapon(itemID)
-                    elseif itemID == "armor_hev" then ply:RemoveSuit(); ply:SetArmor(0) end
+
+                    -- FIX: Use slot type
+                    if itemData and (itemData.Slot == "Primary" or itemData.Slot == "Secondary") then
+                        ply:StripWeapon(itemID)
+                    elseif itemID == "armor_hev" then
+                        ply:RemoveSuit()
+                        ply:SetArmor(0)
+                    end
+
                     if slot == "Backpack" then ply:SetNWString("TarkovBackpack", "") end
                     SyncInventory(ply)
                 end
@@ -406,8 +428,14 @@ if SERVER then
                             ply.TarkovData.Containers[container][index] = nil
                             ply.TarkovData.Equipment[itemData.Slot] = itemID
 
-                            if string.sub(itemID, 1, 6) == "weapon" then ply:Give(itemID)
-                            elseif itemID == "armor_hev" then ply:EquipSuit(); ply:SetArmor(100) end
+                            -- FIX: Use slot type
+                            if itemData.Slot == "Primary" or itemData.Slot == "Secondary" then
+                                ply:Give(itemID)
+                                ply:SelectWeapon(itemID)
+                            elseif itemData.Slot == "Armor" and itemID == "armor_hev" then
+                                ply:EquipSuit()
+                                ply:SetArmor(100)
+                            end
                             if itemData.Slot == "Backpack" then ply:SetNWString("TarkovBackpack", itemData.Model) end
 
                             SyncInventory(ply)
@@ -422,9 +450,17 @@ if SERVER then
             local slot = net.ReadString()
             local itemID = ply.TarkovData.Equipment[slot]
             if itemID then
+                local itemData = ITEMS[itemID]
                 ply.TarkovData.Equipment[slot] = nil
-                if string.sub(itemID, 1, 6) == "weapon" then ply:StripWeapon(itemID)
-                elseif itemID == "armor_hev" then ply:RemoveSuit(); ply:SetArmor(0) end
+
+                -- FIX: Use slot type
+                if itemData and (itemData.Slot == "Primary" or itemData.Slot == "Secondary") then
+                    ply:StripWeapon(itemID)
+                elseif itemID == "armor_hev" then
+                    ply:RemoveSuit()
+                    ply:SetArmor(0)
+                end
+
                 if slot == "Backpack" then ply:SetNWString("TarkovBackpack", "") end
 
                 local ent = ents.Create("ent_loot_item")
