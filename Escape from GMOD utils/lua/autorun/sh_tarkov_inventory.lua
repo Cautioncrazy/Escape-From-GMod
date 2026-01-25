@@ -115,8 +115,12 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
             if wep.Spawnable and wep.PrintName then
                 local id = wep.ClassName
                 if not ITEMS[id] then
-                    -- FIX: Ensure a valid model exists, even if the weapon definition is incomplete
+                    -- FIX: Ensure a valid model exists, using common addon fields
                     local mdl = wep.WorldModel
+                    if not mdl or mdl == "" then mdl = wep.WM end -- ArcCW/TFA
+                    if not mdl or mdl == "" then mdl = wep.ViewModel end -- Last resort
+
+                    -- Sanity check for error model
                     if not mdl or mdl == "" or mdl == "models/error.mdl" then
                         mdl = "models/weapons/w_rif_ak47.mdl" -- Fallback generic weapon
                     end
