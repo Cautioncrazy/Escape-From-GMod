@@ -735,11 +735,63 @@ if CLIENT then
                 end
 
                 local baseMousePressed = model.OnMousePressed
+                local lastClick = 0
                 model.OnMousePressed = function(s, code)
-                    if code == MOUSE_LEFT and input.IsKeyDown(KEY_LCONTROL) and quickAction then
-                        quickAction()
-                        return
+                    if code == MOUSE_LEFT then
+                        if input.IsKeyDown(KEY_LCONTROL) and quickAction then
+                            quickAction()
+                            return
+                        end
+
+                        -- Double Click Logic
+                        if CurTime() - lastClick < 0.3 then
+                            lastClick = 0 -- Reset to prevent triple-click triggering twice
+
+                            local container = draggableData and draggableData.Container
+                            local index = draggableData and draggableData.Index
+                            local data = ITEMS[itemID]
+
+                            if container and index and data then
+                                if container == "cache" then
+                                    if data.Type == "item" then
+                                        -- Use/Consume from Cache
+                                        net.Start(TAG.."_Action")
+                                        net.WriteString("use")
+                                        net.WriteString(container)
+                                        net.WriteUInt(index, 8)
+                                        net.SendToServer()
+                                    else
+                                        -- Take (Quick Move)
+                                        net.Start(TAG.."_Action")
+                                        net.WriteString("quick_move")
+                                        net.WriteString(container)
+                                        net.WriteUInt(index, 8)
+                                        net.SendToServer()
+                                    end
+                                else
+                                    -- Inventory
+                                    if data.Type == "equip" then
+                                        -- Equip
+                                        net.Start(TAG.."_Action")
+                                        net.WriteString("equip")
+                                        net.WriteString(container)
+                                        net.WriteUInt(index, 8)
+                                        net.SendToServer()
+                                    elseif data.Type == "item" then
+                                        -- Use
+                                        net.Start(TAG.."_Action")
+                                        net.WriteString("use")
+                                        net.WriteString(container)
+                                        net.WriteUInt(index, 8)
+                                        net.SendToServer()
+                                    end
+                                end
+                            end
+                            return
+                        end
+                        lastClick = CurTime()
                     end
+
                     if code == MOUSE_RIGHT and onClick then
                         onClick()
                         return
@@ -1037,6 +1089,61 @@ if CLIENT then
         if key == IN_USE and IsFirstTimePredicted() then
             local tr = util.TraceHull({start=ply:GetShootPos(),endpos=ply:GetShootPos()+ply:GetAimVector()*100,mins=Vector(-10,-10,-10),maxs=Vector(10,10,10),filter=ply})
             if IsValid(tr.Entity) and tr.Entity.IsTarkovLoot then net.Start(TAG.."_Pickup"); net.WriteEntity(tr.Entity); net.SendToServer() end
+        end
+    end)
+
+    -- QUICK KEYS (G / V)
+    hook.Add("PlayerButtonDown", "TarkovQuickKeys", function(ply, key)
+        if not IsFirstTimePredicted() then return end
+        if gui.IsGameUIVisible() or (vgui.GetKeyboardFocus() and vgui.GetKeyboardFocus():GetClassName() == "TextEntry") then return end
+
+        local slotName
+        if key == KEY_G then slotName = "Grenade" end
+        if key == KEY_V then slotName = "Melee" end
+
+        if not slotName then return end
+
+        local itemID = LocalData.Equipment[slotName]
+        if not itemID or not ITEMS[itemID] then return end
+
+        local wepClass = itemID
+        local wep = ply:GetWeapon(wepClass)
+
+        if IsValid(wep) then
+            local currentWep = ply:GetActiveWeapon()
+            if not IsValid(currentWep) then return end
+
+            -- If already active, just attack
+            if currentWep == wep then
+                 RunConsoleCommand("+attack")
+                 timer.Simple(0.1, function() RunConsoleCommand("-attack") end)
+                 return
+            end
+
+            local prevWepClass = currentWep:GetClass()
+
+            -- Switch
+            input.SelectWeapon(wep)
+
+            -- Timed Attack Sequence
+            timer.Create("TarkovQuick_"..slotName, 0.4, 1, function()
+                if not IsValid(ply) or ply:GetActiveWeapon() ~= wep then return end
+
+                RunConsoleCommand("+attack")
+
+                timer.Simple(0.15, function()
+                    RunConsoleCommand("-attack")
+
+                    timer.Simple(0.6, function()
+                        if not IsValid(ply) then return end
+                        -- Only switch back if we are still holding the quick weapon
+                        if ply:GetActiveWeapon() == wep then
+                             local prev = ply:GetWeapon(prevWepClass)
+                             if IsValid(prev) then input.SelectWeapon(prev) end
+                        end
+                    end)
+                end)
+            end)
         end
     end)
 end
