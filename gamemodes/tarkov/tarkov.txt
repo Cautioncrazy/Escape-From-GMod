@@ -1,0 +1,7 @@
+"tarkov"
+{
+    "base"          "base"
+    "title"         "Escape from GMOD"
+    "maps"          "^gm_construct$"
+    "menusystem"    "1"
+}
