@@ -153,36 +153,42 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
         -- Scan for Spawnable Weapons
         for _, wep in pairs(list.Get("Weapon")) do
             if wep.Spawnable and wep.PrintName then
-                local id = wep.ClassName
-                if not ITEMS[id] then
-                    -- Get the truest definition we can find
-                    local stored = weapons.GetStored(id) or wep
+                -- Protected call to prevent one bad weapon from breaking everything
+                local success, err = pcall(function()
+                    local id = wep.ClassName
+                    if not ITEMS[id] then
+                        -- Get the truest definition we can find
+                        local stored = weapons.GetStored(id) or wep
 
-                    -- FIX: Ensure a valid model exists, using common addon fields
-                    local mdl = stored.WorldModel
-                    if not mdl or mdl == "" then mdl = stored.WM end -- ArcCW/TFA
-                    if not mdl or mdl == "" then mdl = stored.ViewModel end -- Last resort
+                        -- FIX: Ensure a valid model exists, using common addon fields
+                        local mdl = stored.WorldModel
+                        if not mdl or mdl == "" then mdl = stored.WM end -- ArcCW/TFA
+                        if not mdl or mdl == "" then mdl = stored.ViewModel end -- Last resort
 
-                    -- Fallback to list entry if stored failed
-                    if not mdl or mdl == "" then mdl = wep.WorldModel end
-                    if not mdl or mdl == "" then mdl = wep.ViewModel end
+                        -- Fallback to list entry if stored failed
+                        if not mdl or mdl == "" then mdl = wep.WorldModel end
+                        if not mdl or mdl == "" then mdl = wep.ViewModel end
 
-                    -- Sanity check for error model
-                    if not mdl or mdl == "" or mdl == "models/error.mdl" then
-                        mdl = "models/weapons/w_rif_ak47.mdl" -- Fallback generic weapon
+                        -- Sanity check for error model
+                        if not mdl or mdl == "" or mdl == "models/error.mdl" then
+                            mdl = "models/weapons/w_rif_ak47.mdl" -- Fallback generic weapon
+                        end
+
+                        -- DETERMINE SLOT
+                        local slot = GetWeaponSlot(stored)
+
+                        RegisterItem(id, {
+                            Name = wep.PrintName,
+                            Desc = "Weapon: " .. (wep.Category or "Unknown"),
+                            Model = mdl,
+                            Type = "equip",
+                            Slot = slot,
+                            Weight = 2.0
+                        })
                     end
-
-                    -- DETERMINE SLOT
-                    local slot = GetWeaponSlot(stored)
-
-                    RegisterItem(id, {
-                        Name = wep.PrintName,
-                        Desc = "Weapon: " .. (wep.Category or "Unknown"),
-                        Model = mdl,
-                        Type = "equip",
-                        Slot = slot,
-                        Weight = 2.0
-                    })
+                end)
+                if not success then
+                    print("[Tarkov Inv] Error registering weapon " .. tostring(wep.ClassName) .. ": " .. tostring(err))
                 end
             end
         end

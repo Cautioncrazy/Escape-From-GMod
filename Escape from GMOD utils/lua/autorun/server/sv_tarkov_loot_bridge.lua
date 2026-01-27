@@ -35,6 +35,12 @@ local function BuildLootPools()
     -- Get All Items from shared registry
     local allItems = GetAllTarkovItems()
 
+    -- Safety Check
+    if not allItems then
+        print("[Tarkov Bridge] CRITICAL ERROR: GetAllTarkovItems returned nil!")
+        return
+    end
+
     -- Reset Pools
     LOOT_POOLS = {
         ["weapons"] = {},
