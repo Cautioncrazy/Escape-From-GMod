@@ -129,8 +129,22 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
             -- ArcCW specific check for throwables
             if wep.Throwing or (wep.Primary and string.find(tostring(wep.Primary.Ammo), "grenade")) then return "Grenade" end
 
-            -- 3. DETECT SECONDARY (Pistols)
+            -- 3. DETECT SECONDARY (Pistols, SMGs, Launchers)
             if slot == 1 or hold == "pistol" or hold == "revolver" then return "Secondary" end
+
+            -- Detect SMGs as secondary if explicit Slot 1 or defined by keywords
+            if string.find(cat, "secondary") then return "Secondary" end
+            -- Launchers / RPGs
+            if hold == "rpg" or string.find(name, "launcher") or string.find(name, "rpg") or string.find(cat, "launcher") then return "Secondary" end
+            -- Small SMGs / Machine Pistols
+            if hold == "smg" or string.find(name, "smg") or string.find(name, "mp7") or string.find(name, "mp9") or string.find(name, "mac") or string.find(name, "uzi") then
+                -- Default SMGs to Secondary unless explicitly marked as Slot 2 (Primary) AND not a "Machine Pistol"
+                if slot == 2 then
+                     if string.find(name, "machine pistol") or string.find(name, "micro") then return "Secondary" end
+                     return "Primary" -- Large SMG
+                end
+                return "Secondary"
+            end
 
             -- 4. DEFAULT TO PRIMARY
             return "Primary"
@@ -1120,11 +1134,20 @@ if CLIENT then
 
         if not slotName then return end
 
+        -- DEBUG
+        -- print("[TarkovQuick] Key Pressed: " .. slotName)
+
         local itemID = LocalData.Equipment[slotName]
-        if not itemID or not ITEMS[itemID] then return end
+        if not itemID or not ITEMS[itemID] then
+            -- print("[TarkovQuick] No item in slot or invalid item.")
+            return
+        end
 
         local wepClass = itemID
         local wep = ply:GetWeapon(wepClass)
+
+        -- DEBUG
+        -- print("[TarkovQuick] Item: " .. itemID .. " | Entity Valid: " .. tostring(IsValid(wep)))
 
         if IsValid(wep) then
             local currentWep = ply:GetActiveWeapon()
@@ -1143,12 +1166,19 @@ if CLIENT then
             input.SelectWeapon(wep)
 
             -- Timed Attack Sequence
-            timer.Create("TarkovQuick_"..slotName, 0.4, 1, function()
-                if not IsValid(ply) or ply:GetActiveWeapon() ~= wep then return end
+            -- Increased initial delay slightly to account for slow deployments
+            timer.Create("TarkovQuick_"..slotName, 0.5, 1, function()
+                if not IsValid(ply) then return end
+
+                -- Check if switch happened
+                if ply:GetActiveWeapon() ~= wep then
+                    -- print("[TarkovQuick] Switch failed or interrupted. Active: " .. tostring(ply:GetActiveWeapon()))
+                    return
+                end
 
                 RunConsoleCommand("+attack")
 
-                timer.Simple(0.15, function()
+                timer.Simple(0.2, function()
                     RunConsoleCommand("-attack")
 
                     timer.Simple(0.6, function()
@@ -1161,6 +1191,9 @@ if CLIENT then
                     end)
                 end)
             end)
+        else
+            -- Debug: why is weapon invalid?
+            -- print("[TarkovQuick] Weapon entity not found on client. Latency?")
         end
     end)
 end
