@@ -56,7 +56,7 @@ local function BuildLootPools()
         local lName = string.lower(data.Name or "")
 
         -- Categorize based on ID, Type, or Description
-        if data.Slot == "Primary" or data.Slot == "Secondary" or string.find(lId, "weapon") then
+        if data.Slot == "Primary" or data.Slot == "Secondary" or data.Slot == "Melee" or data.Slot == "Grenade" or string.find(lId, "weapon") then
             table.insert(LOOT_POOLS["weapons"], id)
         end
 
