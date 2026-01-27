@@ -557,12 +557,32 @@ if SERVER then
                 -- 2. Try hardcoded consumables
                 if not used and itemData and itemData.Type == "item" then
                     if itemID == "tushonka" then
-                        ply:SetHealth(math.min(ply:Health() + 25, ply:GetMaxHealth()))
+                        ply:SetHunger(math.min(100, ply:GetHunger() + 40))
                         ply:EmitSound("npc/barnacle/barnacle_crunch2.wav")
                         used = true
                     elseif itemID == "medkit" then
-                        ply:SetHealth(math.min(ply:Health() + 50, ply:GetMaxHealth()))
+                        -- Heal limbs logic
+                        local pool = 100
                         ply:EmitSound("items/medshot4.wav")
+
+                        -- Prioritize Head/Thorax (Flags: 1=Head, 2=Thorax, 4=Stomach, 8=LA, 16=RA, 32=LL, 64=RL)
+                        local priorities = {1, 2, 4, 8, 16, 32, 64}
+                        for _, flag in ipairs(priorities) do
+                             local hp = ply:GetLimbHP(flag)
+                             local max = TARKOV_MAX_HP[flag] or 100
+                             local missing = max - hp
+                             if missing > 0 and pool > 0 then
+                                 local heal = math.min(missing, pool)
+                                 ply:SetLimbHP(flag, hp + heal)
+                                 pool = pool - heal
+                             end
+                        end
+
+                        -- Sync Total
+                        local total = 0
+                        for flag, _ in pairs(TARKOV_MAX_HP) do total = total + ply:GetLimbHP(flag) end
+                        ply:SetHealth(total)
+
                         used = true
                     end
                 end
@@ -764,27 +784,36 @@ if CLIENT then
         local leftPanel
         local playerModel
         local rightPanel
+        local sheet
 
         if not IsValid(invFrame) then
             invFrame = vgui.Create("DFrame")
             invFrame:SetSize(800, 600)
             invFrame:Center()
-            invFrame:SetTitle("GEAR & LOOT")
+            invFrame:SetTitle("INVENTORY")
             invFrame:MakePopup()
             invFrame:ShowCloseButton(true)
 
-            -- Cleanup callback
             invFrame.OnRemove = function()
                 CloseDermaMenus()
                 invFrame = nil
-                if IsValid(cacheFrame) then cacheFrame:Remove() cacheFrame = nil end -- Close cache too
+                if IsValid(cacheFrame) then cacheFrame:Remove() cacheFrame = nil end
             end
 
             invFrame.Paint = function(s, w, h)
                 draw.RoundedBox(0, 0, 0, w, h, Color(20, 20, 20, 250))
             end
 
-            leftPanel = vgui.Create("DPanel", invFrame)
+            sheet = vgui.Create("DPropertySheet", invFrame)
+            sheet:Dock(FILL)
+            invFrame.Sheet = sheet
+
+            -- TAB 1: GEAR
+            local gearTab = vgui.Create("DPanel", sheet)
+            gearTab.Paint = function() end
+            sheet:AddSheet("Gear", gearTab, "icon16/user.png")
+
+            leftPanel = vgui.Create("DPanel", gearTab)
             leftPanel:Dock(LEFT)
             leftPanel:SetWide(300)
             leftPanel.Paint = function(s, w, h) draw.RoundedBox(0, 0, 0, w, h, Color(30, 30, 30, 100)) end
@@ -802,7 +831,6 @@ if CLIENT then
                 end
             end
 
-            -- FIX LEAK: Remove attached clientside model when panel is removed
             playerModel.OnRemove = function(self)
                 local ent = self:GetEntity()
                 if IsValid(ent) and IsValid(ent.VisBackpack) then
@@ -811,10 +839,50 @@ if CLIENT then
             end
             invFrame.PlayerModel = playerModel
 
-            rightPanel = vgui.Create("DScrollPanel", invFrame)
+            rightPanel = vgui.Create("DScrollPanel", gearTab)
             rightPanel:Dock(FILL)
             rightPanel:DockMargin(10, 0, 0, 0)
             invFrame.RightPanel = rightPanel
+
+            -- TAB 2: HEALTH
+            local healthTab = vgui.Create("DPanel", sheet)
+            healthTab.Paint = function(s, w, h) draw.RoundedBox(0, 0, 0, w, h, Color(10, 10, 10, 200)) end
+            sheet:AddSheet("Health", healthTab, "icon16/heart.png")
+
+            -- Draw Detailed Health
+            local hModel = vgui.Create("DModelPanel", healthTab)
+            hModel:SetSize(300, 400)
+            hModel:SetPos(50, 50)
+            hModel:SetModel(LocalPlayer():GetModel())
+            hModel.LayoutEntity = function(s, ent) ent:SetAngles(Angle(0, 45, 0)) end
+
+            -- Limb List
+            local limbList = vgui.Create("DScrollPanel", healthTab)
+            limbList:SetSize(300, 400)
+            limbList:SetPos(400, 50)
+
+            local ply = LocalPlayer()
+            local limbs = {
+                {name="Head", flag=1, max=35},
+                {name="Thorax", flag=2, max=85},
+                {name="Stomach", flag=4, max=70},
+                {name="L. Arm", flag=8, max=60},
+                {name="R. Arm", flag=16, max=60},
+                {name="L. Leg", flag=32, max=65},
+                {name="R. Leg", flag=64, max=65},
+            }
+
+            for _, l in ipairs(limbs) do
+                local p = limbList:Add("DPanel")
+                p:Dock(TOP); p:SetTall(40); p:DockMargin(0,0,0,5)
+                p.Paint = function(s, w, h)
+                    draw.RoundedBox(4, 0, 0, w, h, Color(40, 40, 40))
+                    local hp = ply:GetLimbHP(l.flag) or l.max
+                    local pct = hp / l.max
+                    draw.RoundedBox(4, 2, 2, (w-4)*pct, h-4, Color(200* (1-pct), 200*pct, 0))
+                    draw.SimpleText(l.name .. ": " .. math.ceil(hp) .. "/" .. l.max, "DermaDefault", w/2, h/2, Color(255,255,255), 1, 1)
+                end
+            end
         else
             leftPanel = invFrame.LeftPanel
             playerModel = invFrame.PlayerModel
@@ -1039,6 +1107,7 @@ if CLIENT then
             if IsValid(tr.Entity) and tr.Entity.IsTarkovLoot then net.Start(TAG.."_Pickup"); net.WriteEntity(tr.Entity); net.SendToServer() end
         end
     end)
+    concommand.Add("tarkov_open_inventory", function() OpenInventory() end)
 end
 
 -- --- 4. LOOT ITEM ENTITY ---
