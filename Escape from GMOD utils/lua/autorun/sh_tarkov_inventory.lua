@@ -110,6 +110,32 @@ RegisterItem("bitcoin", {
 hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
     -- Delay generation to ensure all weapons (client & server) are fully registered
     timer.Simple(3, function()
+        -- Helper: Determine Slot Type
+        local function GetWeaponSlot(wep)
+            local class = string.lower(wep.ClassName or "")
+            local base = string.lower(wep.Base or "")
+            local cat = string.lower(wep.Category or "")
+            local name = string.lower(wep.PrintName or "")
+            local hold = string.lower(wep.HoldType or "")
+            local slot = wep.Slot or -1
+
+            -- 1. DETECT MELEE
+            if slot == 0 or hold == "melee" or hold == "melee2" or hold == "knife" or hold == "fist" then return "Melee" end
+            if string.find(base, "melee") or string.find(cat, "melee") or string.find(name, "knife") or string.find(name, "bayonet") then return "Melee" end
+
+            -- 2. DETECT GRENADE / THROWABLE
+            if slot == 4 or hold == "grenade" or hold == "slam" then return "Grenade" end
+            if string.find(base, "grenade") or string.find(cat, "grenade") or string.find(name, "grenade") or string.find(name, "smoke") or string.find(name, "flash") then return "Grenade" end
+            -- ArcCW specific check for throwables
+            if wep.Throwing or (wep.Primary and string.find(tostring(wep.Primary.Ammo), "grenade")) then return "Grenade" end
+
+            -- 3. DETECT SECONDARY (Pistols)
+            if slot == 1 or hold == "pistol" or hold == "revolver" then return "Secondary" end
+
+            -- 4. DEFAULT TO PRIMARY
+            return "Primary"
+        end
+
         -- Scan for Spawnable Weapons
         for _, wep in pairs(list.Get("Weapon")) do
             if wep.Spawnable and wep.PrintName then
@@ -132,17 +158,8 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
                         mdl = "models/weapons/w_rif_ak47.mdl" -- Fallback generic weapon
                     end
 
-                    -- print("[Tarkov Inv] Registered " .. id .. " with model: " .. mdl)
-
-                    -- DETERMINE SLOT: Primary, Secondary, Melee, or Grenade
-                    local slot = "Primary"
-                    if wep.Slot == 0 or wep.HoldType == "melee" or wep.HoldType == "knife" then
-                        slot = "Melee"
-                    elseif wep.Slot == 1 then
-                        slot = "Secondary"
-                    elseif wep.Slot == 4 or wep.HoldType == "grenade" or wep.HoldType == "slam" then
-                        slot = "Grenade"
-                    end
+                    -- DETERMINE SLOT
+                    local slot = GetWeaponSlot(stored)
 
                     RegisterItem(id, {
                         Name = wep.PrintName,
