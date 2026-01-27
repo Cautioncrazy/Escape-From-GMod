@@ -1130,6 +1130,23 @@ if CLIENT then
     end)
 
     -- QUICK KEYS (G / V)
+    -- Also use PlayerBindPress to potentially block default actions if we have a valid action
+    hook.Add("PlayerBindPress", "TarkovBindBlock", function(ply, bind, pressed)
+        if not pressed then return end
+        if bind == "noclip" then
+            local itemID = LocalData.Equipment["Melee"]
+            if itemID and ITEMS[itemID] then
+                 -- If we have a melee weapon equipped, BLOCK noclip so we can use it for quick melee
+                 -- But only if we are not in noclip already? No, standard tarkov logic overrides standard commands.
+                 -- Let's just return true to block it.
+                 -- CAUTION: This might annoy admins.
+                 if ply:GetMoveType() ~= MOVETYPE_NOCLIP then
+                     return true
+                 end
+            end
+        end
+    end)
+
     hook.Add("PlayerButtonDown", "TarkovQuickKeys", function(ply, key)
         if not IsFirstTimePredicted() then return end
         if gui.IsGameUIVisible() or (vgui.GetKeyboardFocus() and vgui.GetKeyboardFocus():GetClassName() == "TextEntry") then return end
@@ -1141,11 +1158,11 @@ if CLIENT then
         if not slotName then return end
 
         -- DEBUG
-        -- print("[TarkovQuick] Key Pressed: " .. slotName)
+        print("[TarkovQuick] Key Pressed: " .. slotName)
 
         local itemID = LocalData.Equipment[slotName]
         if not itemID or not ITEMS[itemID] then
-            -- print("[TarkovQuick] No item in slot or invalid item.")
+            print("[TarkovQuick] No item in slot or invalid item.")
             return
         end
 
@@ -1153,7 +1170,7 @@ if CLIENT then
         local wep = ply:GetWeapon(wepClass)
 
         -- DEBUG
-        -- print("[TarkovQuick] Item: " .. itemID .. " | Entity Valid: " .. tostring(IsValid(wep)))
+        print("[TarkovQuick] Item: " .. itemID .. " | Entity Valid: " .. tostring(IsValid(wep)))
 
         if IsValid(wep) then
             local currentWep = ply:GetActiveWeapon()
@@ -1178,7 +1195,7 @@ if CLIENT then
 
                 -- Check if switch happened
                 if ply:GetActiveWeapon() ~= wep then
-                    -- print("[TarkovQuick] Switch failed or interrupted. Active: " .. tostring(ply:GetActiveWeapon()))
+                    print("[TarkovQuick] Switch failed or interrupted. Active: " .. tostring(ply:GetActiveWeapon()))
                     return
                 end
 
@@ -1199,7 +1216,7 @@ if CLIENT then
             end)
         else
             -- Debug: why is weapon invalid?
-            -- print("[TarkovQuick] Weapon entity not found on client. Latency?")
+            print("[TarkovQuick] Weapon entity not found on client. Latency?")
         end
     end)
 end
