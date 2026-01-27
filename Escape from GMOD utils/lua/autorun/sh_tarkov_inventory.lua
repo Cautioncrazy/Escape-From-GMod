@@ -887,10 +887,10 @@ if CLIENT then
             {name="Armor",x=110,y=80},
             {name="Primary",x=10,y=200,w=120,h=60},
             {name="Secondary",x=170,y=200,w=120,h=60},
-            {name="Melee",x=300,y=200,w=80,h=60}, -- New Melee Slot
-            {name="Grenade",x=300,y=270,w=60,h=60}, -- New Grenade Slot
             {name="Rig",x=10,y=300,w=80,h=80},
-            {name="Backpack",x=210,y=300,w=80,h=80}
+            {name="Backpack",x=210,y=300,w=80,h=80},
+            {name="Melee",x=10,y=390,w=80,h=80},
+            {name="Grenade",x=210,y=390,w=80,h=80}
         }
         for _, slotInfo in ipairs(slots) do
             local w,h = slotInfo.w or 80, slotInfo.h or 80
