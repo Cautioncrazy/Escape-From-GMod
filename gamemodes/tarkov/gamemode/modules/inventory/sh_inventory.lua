@@ -151,7 +151,10 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
         end
 
         -- Scan for Spawnable Weapons
-        for _, wep in pairs(list.Get("Weapon")) do
+        local weaponList = list.Get("Weapon")
+        print("[Tarkov Inv] Scanning " .. table.Count(weaponList) .. " weapons...")
+
+        for _, wep in pairs(weaponList) do
             if wep.Spawnable and wep.PrintName then
                 -- Protected call to prevent one bad weapon from breaking everything
                 local success, err = pcall(function()
@@ -194,7 +197,10 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
         end
 
         -- Scan for Spawnable Entities (Simple Props logic)
-        for class, entData in pairs(scripted_ents.GetList()) do
+        local entList = scripted_ents.GetList()
+        print("[Tarkov Inv] Scanning " .. table.Count(entList) .. " entities...")
+
+        for class, entData in pairs(entList) do
             local t = entData.t
             if t.Spawnable and t.PrintName and not ITEMS[class] then
                 -- Attempt to find a real model
@@ -214,7 +220,7 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
                 })
             end
         end
-        print("[Tarkov Inv] Generated dynamic items.")
+        print("[Tarkov Inv] Generated dynamic items. Total items registered: " .. table.Count(ITEMS))
     end)
 end)
 

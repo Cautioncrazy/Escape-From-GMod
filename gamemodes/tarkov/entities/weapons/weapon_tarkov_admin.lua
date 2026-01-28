@@ -285,6 +285,21 @@ if CLIENT then
         end
     end)
 
+    -- Force C-Menu for Base Gamemode (which doesn't have ContextMenuOpen)
+    hook.Add("Think", "TarkovAdminMenu_ForceC", function()
+        if input.IsButtonDown(KEY_C) then
+            local ply = LocalPlayer()
+            if not IsValid(ply) then return end
+
+            local wep = ply:GetActiveWeapon()
+            if IsValid(wep) and wep:GetClass() == "weapon_tarkov_admin" then
+                if not IsValid(frame) then
+                    OpenToolMenu()
+                end
+            end
+        end
+    end)
+
     -- Cleanup on weapon switch
     function SWEP:Holster()
         if IsValid(frame) then frame:Remove() end
