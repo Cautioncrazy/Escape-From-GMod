@@ -167,6 +167,9 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
         return
     end
 
+    -- EXPLICIT IGNORE: Allow Tarkov Entities to handle themselves
+    if ent.IsTarkovLoot then return end
+
     -- Check cache first
     if CLASS_CACHE[class] == false then return end
     if CLASS_CACHE[class] == true then

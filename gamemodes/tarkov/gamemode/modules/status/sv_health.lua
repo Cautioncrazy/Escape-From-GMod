@@ -1,6 +1,12 @@
 -- SV_HEALTH.LUA
 
 hook.Add("PlayerSpawn", "TarkovHealthSpawn", function(ply)
+    -- Safety / Initialization Check
+    if not ply.SetHeadHP then
+        hook.Run("SetupDataTables", ply)
+        if not ply.SetHeadHP then return end
+    end
+
     -- Reset HP
     ply:SetHeadHP(35)
     ply:SetThoraxHP(85)
@@ -24,6 +30,9 @@ end)
 hook.Add("ScalePlayerDamage", "TarkovLimbDamage", function(ply, hitgroup, dmginfo)
     -- Return if God mode
     if not ply:Alive() then return end
+
+    -- Safety Check
+    if not ply.GetLimbHP then return end
 
     -- Get Limb Flag
     local limb = TARKOV_HITGROUP_MAP[hitgroup] or 2 -- Default Thorax if unknown
@@ -108,7 +117,7 @@ end)
 -- Bleeding Tick (Every 2 seconds)
 timer.Create("TarkovBleedTick", 2, 0, function()
     for _, ply in ipairs(player.GetAll()) do
-        if ply:Alive() then
+        if ply:Alive() and ply.GetLightBleeds then
             local light = ply:GetLightBleeds()
             local heavy = ply:GetHeavyBleeds()
 
@@ -149,4 +158,24 @@ timer.Create("TarkovBleedTick", 2, 0, function()
             end
         end
     end
+end)
+
+-- Player Model Randomizer
+local MODELS = {
+    "models/player/group01/male_07.mdl",
+    "models/player/group01/male_01.mdl",
+    "models/player/group01/male_02.mdl",
+    "models/player/group01/male_03.mdl",
+    "models/player/group01/male_04.mdl",
+    "models/player/group01/male_05.mdl",
+    "models/player/group01/male_06.mdl",
+    "models/player/group01/male_08.mdl",
+    "models/player/group01/male_09.mdl"
+    -- Add custom addon models here (e.g., models/player/pmc_usec.mdl)
+}
+
+hook.Add("PlayerSetModel", "TarkovSetModel", function(ply)
+    local mdl = MODELS[math.random(#MODELS)]
+    ply:SetModel(mdl)
+    return true
 end)
