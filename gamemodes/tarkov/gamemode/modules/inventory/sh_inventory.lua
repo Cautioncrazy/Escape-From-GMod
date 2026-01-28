@@ -61,15 +61,6 @@ RegisterItem("armor_hev", {
     Weight = 10.0
 })
 
-RegisterItem("p_fists", {
-    Name = "Fists",
-    Desc = "These are your hands.",
-    Model = "models/weapons/w_pistol.mdl", -- Placeholder model if dropped
-    Type = "equip",
-    Slot = "Melee",
-    Weight = 0.0
-})
-
 -- 2. WEAPONS
 RegisterItem("weapon_smg1", {
     Name = "SMG-1",
@@ -119,48 +110,85 @@ RegisterItem("bitcoin", {
 hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
     -- Delay generation to ensure all weapons (client & server) are fully registered
     timer.Simple(3, function()
+        -- Helper: Determine Slot Type
+        local function GetWeaponSlot(wep)
+            local class = string.lower(wep.ClassName or "")
+            local base = string.lower(wep.Base or "")
+            local cat = string.lower(wep.Category or "")
+            local name = string.lower(wep.PrintName or "")
+            local hold = string.lower(wep.HoldType or "")
+            local slot = wep.Slot or -1
+
+            -- 1. DETECT MELEE
+            if slot == 0 or hold == "melee" or hold == "melee2" or hold == "knife" or hold == "fist" then return "Melee" end
+            if string.find(base, "melee") or string.find(cat, "melee") or string.find(name, "knife") or string.find(name, "bayonet") then return "Melee" end
+
+            -- 2. DETECT GRENADE / THROWABLE
+            if slot == 4 or hold == "grenade" or hold == "slam" then return "Grenade" end
+            if string.find(base, "grenade") or string.find(cat, "grenade") or string.find(name, "grenade") or string.find(name, "smoke") or string.find(name, "flash") then return "Grenade" end
+            -- ArcCW specific check for throwables
+            if wep.Throwing or (wep.Primary and string.find(tostring(wep.Primary.Ammo), "grenade")) then return "Grenade" end
+
+            -- 3. DETECT SECONDARY (Pistols, SMGs, Launchers)
+            if slot == 1 or hold == "pistol" or hold == "revolver" then return "Secondary" end
+
+            -- Detect SMGs as secondary if explicit Slot 1 or defined by keywords
+            if string.find(cat, "secondary") then return "Secondary" end
+            -- Launchers / RPGs
+            if hold == "rpg" or string.find(name, "launcher") or string.find(name, "rpg") or string.find(cat, "launcher") then return "Secondary" end
+            -- Small SMGs / Machine Pistols
+            if hold == "smg" or string.find(name, "smg") or string.find(name, "mp7") or string.find(name, "mp9") or string.find(name, "mac") or string.find(name, "uzi") then
+                -- Default SMGs to Secondary unless explicitly marked as Slot 2 (Primary) AND not a "Machine Pistol"
+                if slot == 2 then
+                     if string.find(name, "machine pistol") or string.find(name, "micro") then return "Secondary" end
+                     return "Primary" -- Large SMG
+                end
+                return "Secondary"
+            end
+
+            -- 4. DEFAULT TO PRIMARY
+            return "Primary"
+        end
+
         -- Scan for Spawnable Weapons
         for _, wep in pairs(list.Get("Weapon")) do
             if wep.Spawnable and wep.PrintName then
-                local id = wep.ClassName
-                if not ITEMS[id] then
-                    -- Get the truest definition we can find
-                    local stored = weapons.GetStored(id) or wep
+                -- Protected call to prevent one bad weapon from breaking everything
+                local success, err = pcall(function()
+                    local id = wep.ClassName
+                    if not ITEMS[id] then
+                        -- Get the truest definition we can find
+                        local stored = weapons.GetStored(id) or wep
 
-                    -- FIX: Ensure a valid model exists, using common addon fields
-                    local mdl = stored.WorldModel
-                    if not mdl or mdl == "" then mdl = stored.WM end -- ArcCW/TFA
-                    if not mdl or mdl == "" then mdl = stored.ViewModel end -- Last resort
+                        -- FIX: Ensure a valid model exists, using common addon fields
+                        local mdl = stored.WorldModel
+                        if not mdl or mdl == "" then mdl = stored.WM end -- ArcCW/TFA
+                        if not mdl or mdl == "" then mdl = stored.ViewModel end -- Last resort
 
-                    -- Fallback to list entry if stored failed
-                    if not mdl or mdl == "" then mdl = wep.WorldModel end
-                    if not mdl or mdl == "" then mdl = wep.ViewModel end
+                        -- Fallback to list entry if stored failed
+                        if not mdl or mdl == "" then mdl = wep.WorldModel end
+                        if not mdl or mdl == "" then mdl = wep.ViewModel end
 
-                    -- Sanity check for error model
-                    if not mdl or mdl == "" or mdl == "models/error.mdl" then
-                        mdl = "models/weapons/w_rif_ak47.mdl" -- Fallback generic weapon
+                        -- Sanity check for error model
+                        if not mdl or mdl == "" or mdl == "models/error.mdl" then
+                            mdl = "models/weapons/w_rif_ak47.mdl" -- Fallback generic weapon
+                        end
+
+                        -- DETERMINE SLOT
+                        local slot = GetWeaponSlot(stored)
+
+                        RegisterItem(id, {
+                            Name = wep.PrintName,
+                            Desc = "Weapon: " .. (wep.Category or "Unknown"),
+                            Model = mdl,
+                            Type = "equip",
+                            Slot = slot,
+                            Weight = 2.0
+                        })
                     end
-
-                    -- print("[Tarkov Inv] Registered " .. id .. " with model: " .. mdl)
-
-                    -- DETERMINE SLOT: Primary, Secondary, Melee, or Grenade
-                    local slot = "Primary"
-                    if wep.Slot == 0 or wep.HoldType == "melee" or wep.HoldType == "knife" then
-                        slot = "Melee"
-                    elseif wep.Slot == 1 then
-                        slot = "Secondary"
-                    elseif wep.Slot == 4 or wep.HoldType == "grenade" or wep.HoldType == "slam" then
-                        slot = "Grenade"
-                    end
-
-                    RegisterItem(id, {
-                        Name = wep.PrintName,
-                        Desc = "Weapon: " .. (wep.Category or "Unknown"),
-                        Model = mdl,
-                        Type = "equip",
-                        Slot = slot,
-                        Weight = 2.0
-                    })
+                end)
+                if not success then
+                    print("[Tarkov Inv] Error registering weapon " .. tostring(wep.ClassName) .. ": " .. tostring(err))
                 end
             end
         end
@@ -225,27 +253,6 @@ if SERVER then
         ply.ActiveLootCache = nil
         ply.IsSearching = false
         ply.SearchedCaches = {} -- Reset on spawn
-    end)
-
-    -- Restore Gear on Loadout
-    hook.Add("PlayerLoadout", "TarkovLoadout", function(ply)
-        EnsureProfile(ply)
-
-        -- Always give fists
-        ply:Give("p_fists")
-
-        -- Give equipped weapons
-        for slot, id in pairs(ply.TarkovData.Equipment) do
-            local data = ITEMS[id]
-            if data then
-                if data.Slot == "Primary" or data.Slot == "Secondary" or data.Slot == "Melee" or data.Slot == "Grenade" then
-                    ply:Give(id)
-                elseif data.Slot == "Armor" and id == "armor_hev" then
-                    ply:EquipSuit(); ply:SetArmor(100)
-                end
-            end
-        end
-        return true -- Suppress default loadout
     end)
 
     -- Helper: Get Capacity of a container for a player
@@ -576,45 +583,23 @@ if SERVER then
                 -- or if it is a consumable defined below
                 local used = false
 
-                -- 1. Try hardcoded consumables FIRST
-                if itemData and itemData.Type == "item" then
+                -- 1. Try generic entity usage (Ammo, Weapons, etc.)
+                local entTable = scripted_ents.Get(itemID)
+                if entTable then
+                    -- Give the entity to the player (standard GMod behavior for ammo/weps)
+                    ply:Give(itemID)
+                    used = true
+                end
+
+                -- 2. Try hardcoded consumables
+                if not used and itemData and itemData.Type == "item" then
                     if itemID == "tushonka" then
-                        ply:SetHunger(math.min(100, ply:GetHunger() + 40))
+                        ply:SetHealth(math.min(ply:Health() + 25, ply:GetMaxHealth()))
                         ply:EmitSound("npc/barnacle/barnacle_crunch2.wav")
                         used = true
                     elseif itemID == "medkit" then
-                        -- Heal limbs logic
-                        local pool = 100
+                        ply:SetHealth(math.min(ply:Health() + 50, ply:GetMaxHealth()))
                         ply:EmitSound("items/medshot4.wav")
-
-                        -- Prioritize Head/Thorax (Flags: 1=Head, 2=Thorax, 4=Stomach, 8=LA, 16=RA, 32=LL, 64=RL)
-                        local priorities = {1, 2, 4, 8, 16, 32, 64}
-                        for _, flag in ipairs(priorities) do
-                             local hp = ply:GetLimbHP(flag)
-                             local max = TARKOV_MAX_HP[flag] or 100
-                             local missing = max - hp
-                             if missing > 0 and pool > 0 then
-                                 local heal = math.min(missing, pool)
-                                 ply:SetLimbHP(flag, hp + heal)
-                                 pool = pool - heal
-                             end
-                        end
-
-                        -- Sync Total
-                        local total = 0
-                        for flag, _ in pairs(TARKOV_MAX_HP) do total = total + ply:GetLimbHP(flag) end
-                        ply:SetHealth(total)
-
-                        used = true
-                    end
-                end
-
-                -- 2. Try generic entity usage (Ammo, Weapons, etc.)
-                if not used then
-                    local entTable = scripted_ents.Get(itemID)
-                    if entTable then
-                        -- Give the entity to the player (standard GMod behavior for ammo/weps)
-                        ply:Give(itemID)
                         used = true
                     end
                 end
@@ -787,11 +772,63 @@ if CLIENT then
                 end
 
                 local baseMousePressed = model.OnMousePressed
+                local lastClick = 0
                 model.OnMousePressed = function(s, code)
-                    if code == MOUSE_LEFT and input.IsKeyDown(KEY_LCONTROL) and quickAction then
-                        quickAction()
-                        return
+                    if code == MOUSE_LEFT then
+                        if input.IsKeyDown(KEY_LCONTROL) and quickAction then
+                            quickAction()
+                            return
+                        end
+
+                        -- Double Click Logic
+                        if CurTime() - lastClick < 0.3 then
+                            lastClick = 0 -- Reset to prevent triple-click triggering twice
+
+                            local container = draggableData and draggableData.Container
+                            local index = draggableData and draggableData.Index
+                            local data = ITEMS[itemID]
+
+                            if container and index and data then
+                                if container == "cache" then
+                                    if data.Type == "item" then
+                                        -- Use/Consume from Cache
+                                        net.Start(TAG.."_Action")
+                                        net.WriteString("use")
+                                        net.WriteString(container)
+                                        net.WriteUInt(index, 8)
+                                        net.SendToServer()
+                                    else
+                                        -- Take (Quick Move)
+                                        net.Start(TAG.."_Action")
+                                        net.WriteString("quick_move")
+                                        net.WriteString(container)
+                                        net.WriteUInt(index, 8)
+                                        net.SendToServer()
+                                    end
+                                else
+                                    -- Inventory
+                                    if data.Type == "equip" then
+                                        -- Equip
+                                        net.Start(TAG.."_Action")
+                                        net.WriteString("equip")
+                                        net.WriteString(container)
+                                        net.WriteUInt(index, 8)
+                                        net.SendToServer()
+                                    elseif data.Type == "item" then
+                                        -- Use
+                                        net.Start(TAG.."_Action")
+                                        net.WriteString("use")
+                                        net.WriteString(container)
+                                        net.WriteUInt(index, 8)
+                                        net.SendToServer()
+                                    end
+                                end
+                            end
+                            return
+                        end
+                        lastClick = CurTime()
                     end
+
                     if code == MOUSE_RIGHT and onClick then
                         onClick()
                         return
@@ -816,38 +853,29 @@ if CLIENT then
         local leftPanel
         local playerModel
         local rightPanel
-        local sheet
 
         if not IsValid(invFrame) then
             invFrame = vgui.Create("DFrame")
             invFrame:SetSize(800, 600)
             invFrame:Center()
-            invFrame:SetTitle("INVENTORY")
+            invFrame:SetTitle("GEAR & LOOT")
             invFrame:MakePopup()
             invFrame:ShowCloseButton(true)
 
+            -- Cleanup callback
             invFrame.OnRemove = function()
                 CloseDermaMenus()
                 invFrame = nil
-                if IsValid(cacheFrame) then cacheFrame:Remove() cacheFrame = nil end
+                if IsValid(cacheFrame) then cacheFrame:Remove() cacheFrame = nil end -- Close cache too
             end
 
             invFrame.Paint = function(s, w, h)
                 draw.RoundedBox(0, 0, 0, w, h, Color(20, 20, 20, 250))
             end
 
-            sheet = vgui.Create("DPropertySheet", invFrame)
-            sheet:Dock(FILL)
-            invFrame.Sheet = sheet
-
-            -- TAB 1: GEAR
-            local gearTab = vgui.Create("DPanel", sheet)
-            gearTab.Paint = function() end
-            sheet:AddSheet("Gear", gearTab, "icon16/user.png")
-
-            leftPanel = vgui.Create("DPanel", gearTab)
+            leftPanel = vgui.Create("DPanel", invFrame)
             leftPanel:Dock(LEFT)
-            leftPanel:SetWide(400) -- Increased width to fit all slots
+            leftPanel:SetWide(300)
             leftPanel.Paint = function(s, w, h) draw.RoundedBox(0, 0, 0, w, h, Color(30, 30, 30, 100)) end
             invFrame.LeftPanel = leftPanel
 
@@ -863,6 +891,7 @@ if CLIENT then
                 end
             end
 
+            -- FIX LEAK: Remove attached clientside model when panel is removed
             playerModel.OnRemove = function(self)
                 local ent = self:GetEntity()
                 if IsValid(ent) and IsValid(ent.VisBackpack) then
@@ -871,50 +900,10 @@ if CLIENT then
             end
             invFrame.PlayerModel = playerModel
 
-            rightPanel = vgui.Create("DScrollPanel", gearTab)
+            rightPanel = vgui.Create("DScrollPanel", invFrame)
             rightPanel:Dock(FILL)
             rightPanel:DockMargin(10, 0, 0, 0)
             invFrame.RightPanel = rightPanel
-
-            -- TAB 2: HEALTH
-            local healthTab = vgui.Create("DPanel", sheet)
-            healthTab.Paint = function(s, w, h) draw.RoundedBox(0, 0, 0, w, h, Color(10, 10, 10, 200)) end
-            sheet:AddSheet("Health", healthTab, "icon16/heart.png")
-
-            -- Draw Detailed Health
-            local hModel = vgui.Create("DModelPanel", healthTab)
-            hModel:SetSize(300, 400)
-            hModel:SetPos(50, 50)
-            hModel:SetModel(LocalPlayer():GetModel())
-            hModel.LayoutEntity = function(s, ent) ent:SetAngles(Angle(0, 45, 0)) end
-
-            -- Limb List
-            local limbList = vgui.Create("DScrollPanel", healthTab)
-            limbList:SetSize(300, 400)
-            limbList:SetPos(400, 50)
-
-            local ply = LocalPlayer()
-            local limbs = {
-                {name="Head", flag=1, max=35},
-                {name="Thorax", flag=2, max=85},
-                {name="Stomach", flag=4, max=70},
-                {name="L. Arm", flag=8, max=60},
-                {name="R. Arm", flag=16, max=60},
-                {name="L. Leg", flag=32, max=65},
-                {name="R. Leg", flag=64, max=65},
-            }
-
-            for _, l in ipairs(limbs) do
-                local p = limbList:Add("DPanel")
-                p:Dock(TOP); p:SetTall(40); p:DockMargin(0,0,0,5)
-                p.Paint = function(s, w, h)
-                    draw.RoundedBox(4, 0, 0, w, h, Color(40, 40, 40))
-                    local hp = ply:GetLimbHP(l.flag) or l.max
-                    local pct = hp / l.max
-                    draw.RoundedBox(4, 2, 2, (w-4)*pct, h-4, Color(200* (1-pct), 200*pct, 0))
-                    draw.SimpleText(l.name .. ": " .. math.ceil(hp) .. "/" .. l.max, "DermaDefault", w/2, h/2, Color(255,255,255), 1, 1)
-                end
-            end
         else
             leftPanel = invFrame.LeftPanel
             playerModel = invFrame.PlayerModel
@@ -935,10 +924,10 @@ if CLIENT then
             {name="Armor",x=110,y=80},
             {name="Primary",x=10,y=200,w=120,h=60},
             {name="Secondary",x=170,y=200,w=120,h=60},
-            {name="Melee",x=300,y=200,w=80,h=60}, -- New Melee Slot
-            {name="Grenade",x=300,y=270,w=60,h=60}, -- New Grenade Slot
             {name="Rig",x=10,y=300,w=80,h=80},
-            {name="Backpack",x=210,y=300,w=80,h=80}
+            {name="Backpack",x=210,y=300,w=80,h=80},
+            {name="Melee",x=10,y=390,w=80,h=80},
+            {name="Grenade",x=210,y=390,w=80,h=80}
         }
         for _, slotInfo in ipairs(slots) do
             local w,h = slotInfo.w or 80, slotInfo.h or 80
@@ -1139,7 +1128,97 @@ if CLIENT then
             if IsValid(tr.Entity) and tr.Entity.IsTarkovLoot then net.Start(TAG.."_Pickup"); net.WriteEntity(tr.Entity); net.SendToServer() end
         end
     end)
-    concommand.Add("tarkov_open_inventory", function() OpenInventory() end)
+
+    -- QUICK KEYS (G / V)
+    -- Also use PlayerBindPress to potentially block default actions if we have a valid action
+    hook.Add("PlayerBindPress", "TarkovBindBlock", function(ply, bind, pressed)
+        if not pressed then return end
+        if bind == "noclip" then
+            local itemID = LocalData.Equipment["Melee"]
+            if itemID and ITEMS[itemID] then
+                 -- If we have a melee weapon equipped, BLOCK noclip so we can use it for quick melee
+                 -- But only if we are not in noclip already? No, standard tarkov logic overrides standard commands.
+                 -- Let's just return true to block it.
+                 -- CAUTION: This might annoy admins.
+                 if ply:GetMoveType() ~= MOVETYPE_NOCLIP then
+                     return true
+                 end
+            end
+        end
+    end)
+
+    hook.Add("PlayerButtonDown", "TarkovQuickKeys", function(ply, key)
+        if not IsFirstTimePredicted() then return end
+        if gui.IsGameUIVisible() or (vgui.GetKeyboardFocus() and vgui.GetKeyboardFocus():GetClassName() == "TextEntry") then return end
+
+        local slotName
+        if key == KEY_G then slotName = "Grenade" end
+        if key == KEY_V then slotName = "Melee" end
+
+        if not slotName then return end
+
+        -- DEBUG
+        print("[TarkovQuick] Key Pressed: " .. slotName)
+
+        local itemID = LocalData.Equipment[slotName]
+        if not itemID or not ITEMS[itemID] then
+            print("[TarkovQuick] No item in slot or invalid item.")
+            return
+        end
+
+        local wepClass = itemID
+        local wep = ply:GetWeapon(wepClass)
+
+        -- DEBUG
+        print("[TarkovQuick] Item: " .. itemID .. " | Entity Valid: " .. tostring(IsValid(wep)))
+
+        if IsValid(wep) then
+            local currentWep = ply:GetActiveWeapon()
+            if not IsValid(currentWep) then return end
+
+            -- If already active, just attack
+            if currentWep == wep then
+                 RunConsoleCommand("+attack")
+                 timer.Simple(0.1, function() RunConsoleCommand("-attack") end)
+                 return
+            end
+
+            local prevWepClass = currentWep:GetClass()
+
+            -- Switch
+            input.SelectWeapon(wep)
+
+            -- Timed Attack Sequence
+            -- Increased initial delay slightly to account for slow deployments
+            timer.Create("TarkovQuick_"..slotName, 0.5, 1, function()
+                if not IsValid(ply) then return end
+
+                -- Check if switch happened
+                if ply:GetActiveWeapon() ~= wep then
+                    print("[TarkovQuick] Switch failed or interrupted. Active: " .. tostring(ply:GetActiveWeapon()))
+                    return
+                end
+
+                RunConsoleCommand("+attack")
+
+                timer.Simple(0.2, function()
+                    RunConsoleCommand("-attack")
+
+                    timer.Simple(0.6, function()
+                        if not IsValid(ply) then return end
+                        -- Only switch back if we are still holding the quick weapon
+                        if ply:GetActiveWeapon() == wep then
+                             local prev = ply:GetWeapon(prevWepClass)
+                             if IsValid(prev) then input.SelectWeapon(prev) end
+                        end
+                    end)
+                end)
+            end)
+        else
+            -- Debug: why is weapon invalid?
+            print("[TarkovQuick] Weapon entity not found on client. Latency?")
+        end
+    end)
 end
 
 -- --- 4. LOOT ITEM ENTITY ---

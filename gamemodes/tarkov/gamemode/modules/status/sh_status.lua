@@ -1,6 +1,8 @@
 local TAG = "TarkovStatus"
 
 hook.Add("SetupDataTables", "TarkovStatusDT", function(ply)
+    if not IsValid(ply) or not ply:IsPlayer() then return end
+
     -- Survival
     ply:NetworkVar("Float", 0, "Hunger")
     ply:NetworkVar("Float", 1, "Hydration")
