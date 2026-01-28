@@ -37,6 +37,7 @@ if SERVER then
     AddCSLuaFile("modules/inventory/sh_inventory.lua")
     include("modules/inventory/sh_inventory.lua")
     include("modules/inventory/sv_loot.lua")
+    include("modules/inventory/sv_attachments.lua")
 else
     include("modules/inventory/sh_inventory.lua")
 end

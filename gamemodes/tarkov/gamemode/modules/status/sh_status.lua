@@ -25,6 +25,10 @@ end)
 if CLIENT then
     hook.Add("InitPostEntity", "TarkovStatusInit", function()
         -- Request full update if needed
+        local ply = LocalPlayer()
+        if IsValid(ply) and not ply.GetHeadHP then
+            hook.Run("SetupDataTables", ply)
+        end
     end)
 end
 

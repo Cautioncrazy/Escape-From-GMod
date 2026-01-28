@@ -61,6 +61,15 @@ RegisterItem("armor_hev", {
     Weight = 10.0
 })
 
+RegisterItem("p_fists", {
+    Name = "Fists",
+    Desc = "These are your hands.",
+    Model = "models/weapons/w_pistol.mdl", -- Placeholder model if dropped
+    Type = "equip",
+    Slot = "Melee",
+    Weight = 0.0
+})
+
 -- 2. WEAPONS
 RegisterItem("weapon_smg1", {
     Name = "SMG-1",
@@ -216,6 +225,27 @@ if SERVER then
         ply.ActiveLootCache = nil
         ply.IsSearching = false
         ply.SearchedCaches = {} -- Reset on spawn
+    end)
+
+    -- Restore Gear on Loadout
+    hook.Add("PlayerLoadout", "TarkovLoadout", function(ply)
+        EnsureProfile(ply)
+
+        -- Always give fists
+        ply:Give("p_fists")
+
+        -- Give equipped weapons
+        for slot, id in pairs(ply.TarkovData.Equipment) do
+            local data = ITEMS[id]
+            if data then
+                if data.Slot == "Primary" or data.Slot == "Secondary" or data.Slot == "Melee" or data.Slot == "Grenade" then
+                    ply:Give(id)
+                elseif data.Slot == "Armor" and id == "armor_hev" then
+                    ply:EquipSuit(); ply:SetArmor(100)
+                end
+            end
+        end
+        return true -- Suppress default loadout
     end)
 
     -- Helper: Get Capacity of a container for a player
@@ -546,16 +576,8 @@ if SERVER then
                 -- or if it is a consumable defined below
                 local used = false
 
-                -- 1. Try generic entity usage (Ammo, Weapons, etc.)
-                local entTable = scripted_ents.Get(itemID)
-                if entTable then
-                    -- Give the entity to the player (standard GMod behavior for ammo/weps)
-                    ply:Give(itemID)
-                    used = true
-                end
-
-                -- 2. Try hardcoded consumables
-                if not used and itemData and itemData.Type == "item" then
+                -- 1. Try hardcoded consumables FIRST
+                if itemData and itemData.Type == "item" then
                     if itemID == "tushonka" then
                         ply:SetHunger(math.min(100, ply:GetHunger() + 40))
                         ply:EmitSound("npc/barnacle/barnacle_crunch2.wav")
@@ -583,6 +605,16 @@ if SERVER then
                         for flag, _ in pairs(TARKOV_MAX_HP) do total = total + ply:GetLimbHP(flag) end
                         ply:SetHealth(total)
 
+                        used = true
+                    end
+                end
+
+                -- 2. Try generic entity usage (Ammo, Weapons, etc.)
+                if not used then
+                    local entTable = scripted_ents.Get(itemID)
+                    if entTable then
+                        -- Give the entity to the player (standard GMod behavior for ammo/weps)
+                        ply:Give(itemID)
                         used = true
                     end
                 end
@@ -815,7 +847,7 @@ if CLIENT then
 
             leftPanel = vgui.Create("DPanel", gearTab)
             leftPanel:Dock(LEFT)
-            leftPanel:SetWide(300)
+            leftPanel:SetWide(400) -- Increased width to fit all slots
             leftPanel.Paint = function(s, w, h) draw.RoundedBox(0, 0, 0, w, h, Color(30, 30, 30, 100)) end
             invFrame.LeftPanel = leftPanel
 

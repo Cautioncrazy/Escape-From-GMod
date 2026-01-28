@@ -41,6 +41,9 @@ hook.Add("HUDPaint", "TarkovStatusHUD", function()
     local ply = LocalPlayer()
     if not ply:Alive() then return end
 
+    -- Safety Check: Ensure Status System is loaded/initialized for this player
+    if not ply.GetHydration or not ply.GetHeadHP then return end
+
     local w, h = ScrW(), ScrH()
     local x = 20
     local y = h - 150
