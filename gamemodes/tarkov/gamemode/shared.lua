@@ -14,16 +14,22 @@ function GM:LoadModule(path)
     end
 end
 
--- Load Status Module (Defines NetworkVars)
+-- 1. LOAD CORE (MUST LOAD FIRST)
+-- This defines the NetworkVars (GetHydration, etc.)
 if SERVER then
-    AddCSLuaFile("modules/status/sh_status.lua")
-    include("modules/status/sh_status.lua")
-    include("modules/status/sv_status.lua")
+    AddCSLuaFile("core/sh_status.lua")
+    include("core/sh_status.lua")
 else
-    include("modules/status/sh_status.lua")
+    include("core/sh_status.lua")
 end
 
--- Load Health Module (Defines Meta Methods, Depends on Status)
+-- 2. LOAD STATUS SYSTEM (Depends on Core)
+if SERVER then
+    AddCSLuaFile("modules/status/sv_status.lua")
+    include("modules/status/sv_status.lua")
+end
+
+-- 3. LOAD HEALTH SYSTEM (Depends on Status)
 if SERVER then
     AddCSLuaFile("modules/status/sh_health.lua")
     include("modules/status/sh_health.lua")
@@ -32,7 +38,7 @@ else
     include("modules/status/sh_health.lua")
 end
 
--- Load Inventory Module (Depends on Health/Status)
+-- 4. LOAD INVENTORY SYSTEM (Depends on Health/Status)
 if SERVER then
     AddCSLuaFile("modules/inventory/sh_inventory.lua")
     include("modules/inventory/sh_inventory.lua")
@@ -41,9 +47,17 @@ else
     include("modules/inventory/sh_inventory.lua")
 end
 
--- Load HUD Module (Client Only)
+-- 5. LOAD HUD (Depends on Everything)
 if SERVER then
     AddCSLuaFile("modules/hud/cl_hud.lua")
 else
     include("modules/hud/cl_hud.lua")
+end
+
+-- 6. LOAD ADMIN PROPERTIES (Independent)
+if SERVER then
+    AddCSLuaFile("modules/admin/sh_admin_properties.lua")
+    include("modules/admin/sh_admin_properties.lua")
+else
+    include("modules/admin/sh_admin_properties.lua")
 end
