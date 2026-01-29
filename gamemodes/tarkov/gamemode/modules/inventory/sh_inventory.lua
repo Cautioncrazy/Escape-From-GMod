@@ -151,10 +151,7 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
         end
 
         -- Scan for Spawnable Weapons
-        local weaponList = list.Get("Weapon")
-        print("[Tarkov Inv] Scanning " .. table.Count(weaponList) .. " weapons...")
-
-        for _, wep in pairs(weaponList) do
+        for _, wep in pairs(list.Get("Weapon")) do
             if wep.Spawnable and wep.PrintName then
                 -- Protected call to prevent one bad weapon from breaking everything
                 local success, err = pcall(function()
@@ -197,10 +194,7 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
         end
 
         -- Scan for Spawnable Entities (Simple Props logic)
-        local entList = scripted_ents.GetList()
-        print("[Tarkov Inv] Scanning " .. table.Count(entList) .. " entities...")
-
-        for class, entData in pairs(entList) do
+        for class, entData in pairs(scripted_ents.GetList()) do
             local t = entData.t
             if t.Spawnable and t.PrintName and not ITEMS[class] then
                 -- Attempt to find a real model
@@ -220,7 +214,7 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
                 })
             end
         end
-        print("[Tarkov Inv] Generated dynamic items. Total items registered: " .. table.Count(ITEMS))
+        print("[Tarkov Inv] Generated dynamic items.")
     end)
 end)
 
@@ -1285,15 +1279,6 @@ if SERVER then
         self:PhysicsInit(SOLID_VPHYSICS); self:SetMoveType(MOVETYPE_VPHYSICS); self:SetSolid(SOLID_VPHYSICS); self:SetUseType(SIMPLE_USE)
         local phys = self:GetPhysicsObject(); if IsValid(phys) then phys:Wake() end
 
-        -- Fill with Random Loot
-        self.CacheInventory = {}
-        local keys = {}
-        for k in pairs(ITEMS) do table.insert(keys, k) end
-        for i=1, math.random(5, 10) do
-            local item = keys[math.random(#keys)]
-            local slot = math.random(1, 20)
-            if not self.CacheInventory[slot] then self.CacheInventory[slot] = item end
-        end
     end
 
     function ENT_CACHE:Use(activator)
