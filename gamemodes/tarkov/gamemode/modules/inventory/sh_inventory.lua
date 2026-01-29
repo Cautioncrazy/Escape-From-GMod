@@ -107,7 +107,38 @@ RegisterItem("bitcoin", {
 })
 
 -- --- 4. DYNAMIC LOOT GENERATION (NEW) ---
+local Tarkov_ArcCW_Map = {} -- Map EntityClass -> ArcCW ShortName
+
 function TarkovGenerateItems()
+    -- Build ArcCW Map & Register Items Properly
+    if ArcCW and ArcCW.AttachmentTable then
+        for shortName, data in pairs(ArcCW.AttachmentTable) do
+             -- 1. Populate Map
+             if data.Entity then
+                 Tarkov_ArcCW_Map[data.Entity] = shortName
+             end
+             Tarkov_ArcCW_Map[shortName] = shortName
+
+             local entName = "arccw_att_" .. shortName
+             Tarkov_ArcCW_Map[entName] = shortName
+
+             -- 2. Register Item with Correct Model
+             -- We prioritize the entity name that will likely be spawned (arccw_att_...)
+             -- This preempts the generic scripted_ents loop below
+             local targetID = data.Entity or entName
+
+             if not ITEMS[targetID] then
+                 RegisterItem(targetID, {
+                     Name = data.PrintName or shortName,
+                     Desc = "Attachment: " .. (data.Description or "Modification"),
+                     Model = data.Model or "models/items/item_item_crate.mdl", -- Fallback if data.Model is missing, but usually present
+                     Type = "item",
+                     Weight = 0.5
+                 })
+             end
+        end
+    end
+
     -- Helper: Determine Slot Type
     local function GetWeaponSlot(wep)
         local class = string.lower(wep.ClassName or "")
@@ -637,10 +668,30 @@ if SERVER then
                     return
                 end
 
-                -- 2. Generic Entities (Weapons, Ammo, Attachments)
+                -- 2. Check if Item is Equippable Gear (Backpack/Rig/Armor)
+                if itemData.Type == "equip" then
+                    -- Reuse Equip Logic (but from inventory context)
+                    if not ply.TarkovData.Equipment[itemData.Slot] then
+                        ply.TarkovData.Containers[container][index] = nil
+                        ply.TarkovData.Equipment[itemData.Slot] = itemID
+
+                        if itemData.Slot == "Armor" and itemID == "armor_hev" then
+                            ply:EquipSuit(); ply:SetArmor(100)
+                        end
+                        if itemData.Slot == "Backpack" then ply:SetNWString("TarkovBackpack", itemData.Model) end
+
+                        SyncInventory(ply)
+                        ply:ChatPrint("Equipped " .. itemData.Name)
+                    else
+                        ply:ChatPrint("Slot " .. itemData.Slot .. " is occupied! Unequip first.")
+                    end
+                    return
+                end
+
+                -- 3. Generic Entities (Weapons, Ammo, Attachments)
                 local entTable = scripted_ents.Get(itemID)
                 if entTable then
-                    -- Heuristic: Is it a weapon/ammo or an attachment?
+                    -- Heuristic: Is it a weapon/ammo?
                     local isWeapon = entTable.Base == "weapon_base" or string.find(itemID, "weapon")
                     if entTable.Base == "arccw_base" or entTable.Base == "arc9_base" then isWeapon = true end
                     local isAmmo = string.find(itemID, "ammo")
@@ -650,14 +701,25 @@ if SERVER then
                         itemList[index] = nil
                         SyncInventory(ply)
                     else
-                        -- Likely Attachment: Move to Inventory if in Cache
-                        if container == "cache" then
-                             if AddItemToInventory(ply, itemID) then
-                                 itemList[index] = nil
-                                 SyncInventory(ply)
-                             end
+                        -- Attachments: Give to standard inventory for ArcCW/Arc9 to detect
+                        local given = false
+
+                        -- Check ArcCW Map
+                        local arcCWID = Tarkov_ArcCW_Map[itemID]
+                        if ArcCW and ArcCW.PlayerGiveAtt and arcCWID then
+                            ArcCW:PlayerGiveAtt(ply, arcCWID, 1)
+                            if ArcCW.PlayerSendAttInv then ArcCW:PlayerSendAttInv(ply) end -- Force Sync
+                            given = true
+                        end
+
+                        if given then
+                            itemList[index] = nil
+                            SyncInventory(ply)
+                            ply:ChatPrint("Added " .. (ITEMS[itemID].Name or itemID) .. " to weapon inventory.")
                         else
-                             ply:ChatPrint("Use this item in the Customization Menu.")
+                             -- DO NOT SPAWN PROP.
+                             -- If it's not a weapon and not an attachment we know, we can't 'Use' it.
+                             ply:ChatPrint("Cannot use this item directly.")
                         end
                     end
                 end
