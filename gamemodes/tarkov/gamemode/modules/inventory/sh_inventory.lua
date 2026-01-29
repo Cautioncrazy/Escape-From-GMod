@@ -650,20 +650,15 @@ if SERVER then
                         itemList[index] = nil
                         SyncInventory(ply)
                     else
-                        -- Attachments: Give to standard inventory for ArcCW/Arc9 to detect
-                        local given = false
-                        if ArcCW and ArcCW.AttachmentTable and ArcCW.AttachmentTable[itemID] then
-                            ArcCW:PlayerGiveAtt(ply, itemID, 1)
-                            given = true
+                        -- Likely Attachment: Move to Inventory if in Cache
+                        if container == "cache" then
+                             if AddItemToInventory(ply, itemID) then
+                                 itemList[index] = nil
+                                 SyncInventory(ply)
+                             end
+                        else
+                             ply:ChatPrint("Use this item in the Customization Menu.")
                         end
-
-                        if not given then
-                             ply:Give(itemID) -- Fallback for Arc9 or entities
-                        end
-
-                        itemList[index] = nil
-                        SyncInventory(ply)
-                        ply:ChatPrint("Added " .. (ITEMS[itemID].Name or itemID) .. " to weapon inventory.")
                     end
                 end
             end
