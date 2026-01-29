@@ -110,21 +110,32 @@ RegisterItem("bitcoin", {
 local Tarkov_ArcCW_Map = {} -- Map EntityClass -> ArcCW ShortName
 
 function TarkovGenerateItems()
-    -- Build ArcCW Map
+    -- Build ArcCW Map & Register Items Properly
     if ArcCW and ArcCW.AttachmentTable then
         for shortName, data in pairs(ArcCW.AttachmentTable) do
-             -- Some attachments have .Entity field? Or we check if an entity exists with that name?
-             -- ArcCW usually creates entities named "arccw_att_shortname"
-             -- Let's try to infer or check data.
+             -- 1. Populate Map
              if data.Entity then
                  Tarkov_ArcCW_Map[data.Entity] = shortName
              end
-             -- Also map the shortname to itself just in case
              Tarkov_ArcCW_Map[shortName] = shortName
 
-             -- Standard ArcCW entity naming convention check
              local entName = "arccw_att_" .. shortName
              Tarkov_ArcCW_Map[entName] = shortName
+
+             -- 2. Register Item with Correct Model
+             -- We prioritize the entity name that will likely be spawned (arccw_att_...)
+             -- This preempts the generic scripted_ents loop below
+             local targetID = data.Entity or entName
+
+             if not ITEMS[targetID] then
+                 RegisterItem(targetID, {
+                     Name = data.PrintName or shortName,
+                     Desc = "Attachment: " .. (data.Description or "Modification"),
+                     Model = data.Model or "models/items/item_item_crate.mdl", -- Fallback if data.Model is missing, but usually present
+                     Type = "item",
+                     Weight = 0.5
+                 })
+             end
         end
     end
 
@@ -697,6 +708,7 @@ if SERVER then
                         local arcCWID = Tarkov_ArcCW_Map[itemID]
                         if ArcCW and ArcCW.PlayerGiveAtt and arcCWID then
                             ArcCW:PlayerGiveAtt(ply, arcCWID, 1)
+                            if ArcCW.PlayerSendAttInv then ArcCW:PlayerSendAttInv(ply) end -- Force Sync
                             given = true
                         end
 
