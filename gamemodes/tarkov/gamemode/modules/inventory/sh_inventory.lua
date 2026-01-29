@@ -1284,64 +1284,7 @@ if SERVER then
         self:SetModel("models/items/item_item_crate.mdl")
         self:PhysicsInit(SOLID_VPHYSICS); self:SetMoveType(MOVETYPE_VPHYSICS); self:SetSolid(SOLID_VPHYSICS); self:SetUseType(SIMPLE_USE)
         local phys = self:GetPhysicsObject(); if IsValid(phys) then phys:Wake() end
-
-        -- Fill with Random Loot
-        self.CacheInventory = {}
-        local keys = {}
-        for k in pairs(ITEMS) do table.insert(keys, k) end
-        for i=1, math.random(5, 10) do
-            local item = keys[math.random(#keys)]
-            local slot = math.random(1, 20)
-            if not self.CacheInventory[slot] then self.CacheInventory[slot] = item end
-        end
-    end
-
-    function ENT_CACHE:Use(activator)
-        if not IsValid(activator) or not activator:IsPlayer() then return end
-
-        EnsureProfile(activator) -- Make sure profile exists
-
-        -- Check if already searched
-        if activator.SearchedCaches[self:EntIndex()] then
-            -- SKIP SEARCH - Open Immediately
-            activator.ActiveLootCache = self
-            activator.TarkovData.Containers.cache = table.Copy(self.CacheInventory)
-            net.Start(TAG .. "_Update")
-            net.WriteTable(activator.TarkovData)
-            net.WriteBool(true)
-            net.Send(activator)
-            return
-        end
-
-        if activator.IsSearching then return end
-
-        activator.IsSearching = true
-        activator:EmitSound("physics/cardboard/cardboard_box_impact_soft2.wav")
-
-        net.Start(TAG .. "_SearchUI")
-        net.WriteFloat(3.0)
-        net.Send(activator)
-
-        timer.Simple(3.0, function()
-            if not IsValid(activator) or not IsValid(self) then return end
-            if activator:GetPos():DistToSqr(self:GetPos()) > 150*150 then
-                activator.IsSearching = false
-                return
-            end
-
-            activator.IsSearching = false
-            activator.ActiveLootCache = self
-            activator.SearchedCaches[self:EntIndex()] = true -- MARK AS SEARCHED
-
-            -- Copy data to player session
-            activator.TarkovData.Containers.cache = table.Copy(self.CacheInventory)
-
-            -- Open UI
-            net.Start(TAG .. "_Update")
-            net.WriteTable(activator.TarkovData)
-            net.WriteBool(true)
-            net.Send(activator)
-        end)
+        -- Loot generation is handled by sv_loot.lua via PlayerUse hook to support lazy loading
     end
 end
 
