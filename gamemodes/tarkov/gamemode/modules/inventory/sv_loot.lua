@@ -98,12 +98,37 @@ local function BuildLootPools()
     print("[Tarkov Bridge] Built loot pools with " .. count .. " items.")
 end
 
+concommand.Add("tarkov_debug_loot", function(ply)
+    if IsValid(ply) and not ply:IsSuperAdmin() then return end
+    print("[Tarkov Debug] Forcing loot pool rebuild...")
+    BuildLootPools()
+
+    print("--- LOOT POOL STATS ---")
+    for pool, items in pairs(LOOT_POOLS) do
+        print(string.format("Pool [%s]: %d items", pool, #items))
+        if #items > 0 and #items < 5 then
+             PrintTable(items)
+        end
+    end
+    print("-----------------------")
+
+    if IsValid(ply) then
+        ply:ChatPrint("Loot pools rebuilt. Check server console.")
+    end
+end)
+
 -- Rebuild pools after entities load (so dynamic items are registered)
 hook.Add("InitPostEntity", "TarkovBuildPools", function()
     -- MUST RUN AFTER sh_tarkov_inventory's 3-second timer
     timer.Simple(5, function()
+        -- Fallback: If hook didn't fire for some reason
         BuildLootPools()
     end)
+end)
+
+-- Robust Hook: Listen for item generation completion
+hook.Add("TarkovItemsGenerated", "TarkovBuildPoolsOnGen", function()
+    BuildLootPools()
 end)
 
 -- Helper to get random item from pool
