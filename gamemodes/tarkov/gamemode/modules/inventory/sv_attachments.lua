@@ -61,31 +61,34 @@ end
 
 -- --- ArcCW Integration ---
 
-hook.Add("ArcCW_PlayerCanAttach", "TarkovArcCWRestrict", function(ply, wep, attName, slot, detach)
-    if detach then return true end -- Always allow detaching
+-- DISABLED: We now give the physical item to ArcCW inventory, so we trust ArcCW's internal check.
+-- hook.Add("ArcCW_PlayerCanAttach", "TarkovArcCWRestrict", function(ply, wep, attName, slot, detach)
+--     if detach then return true end -- Always allow detaching
+--
+--     -- Check if player has the item
+--     local c, _ = FindItem(ply, attName)
+--     if c then return true end
+--
+--     return false
+-- end)
 
-    -- Check if player has the item
-    local c, _ = FindItem(ply, attName)
-    if c then return true end
-
-    return false
-end)
-
-hook.Add("ArcCW_OnAttach", "TarkovArcCWConsume", function(ply, wep, attName)
-    ConsumeItem(ply, attName)
-end)
+-- DISABLED: ArcCW handles consumption from its own inventory now.
+-- hook.Add("ArcCW_OnAttach", "TarkovArcCWConsume", function(ply, wep, attName)
+--     ConsumeItem(ply, attName)
+-- end)
 
 -- --- Arc9 Integration ---
 
-hook.Add("ARC9_PlayerCanAttach", "TarkovArc9Restrict", function(ply, wep, attid, slotid, detach)
-    if detach then return true end
+-- DISABLED: Similar logic for Arc9
+-- hook.Add("ARC9_PlayerCanAttach", "TarkovArc9Restrict", function(ply, wep, attid, slotid, detach)
+--     if detach then return true end
+--
+--     local c, _ = FindItem(ply, attid)
+--     if c then return true end
+--
+--     return false
+-- end)
 
-    local c, _ = FindItem(ply, attid)
-    if c then return true end
-
-    return false
-end)
-
-hook.Add("ARC9_OnAttach", "TarkovArc9Consume", function(ply, wep, attid)
-    ConsumeItem(ply, attid)
-end)
+-- hook.Add("ARC9_OnAttach", "TarkovArc9Consume", function(ply, wep, attid)
+--     ConsumeItem(ply, attid)
+-- end)
