@@ -138,6 +138,10 @@ function TarkovGenerateItems()
                  -- Find best model
                  local mdl = data.Model
                  if not mdl or mdl == "" then mdl = data.WorldModel end
+                 -- Try Arc9/Standard fallback keys
+                 if not mdl or mdl == "" then mdl = data.WM end
+                 if not mdl or mdl == "" then mdl = data.ViewModel end
+
                  if not mdl or mdl == "" then mdl = "models/items/item_item_crate.mdl" end
 
                  RegisterItem(entName, {
@@ -708,6 +712,41 @@ if SERVER then
                 SyncInventory(ply)
             end
 
+        elseif action == "attach_equip" then
+            local slotName = net.ReadString()
+            local container = net.ReadString()
+            local index = net.ReadUInt(8)
+
+            local wepID = ply.TarkovData.Equipment[slotName]
+            local list = ply.TarkovData.Containers[container]
+
+            if wepID and list and list[index] then
+                local itemID = list[index]
+                local shortName = Tarkov_ArcCW_Map[itemID]
+
+                if shortName then
+                    local wep = ply:GetWeapon(wepID)
+                    if IsValid(wep) and wep.Attachments then
+                        -- Attempt to auto-attach to first compatible free slot
+                        for i, slotData in pairs(wep.Attachments) do
+                            if not slotData.Installed then
+                                -- Try attach
+                                if wep:Attach(i, shortName) then
+                                    ply:EmitSound("weapons/arccw/install.wav")
+                                    -- Success! Item removal is handled by ArcCW_OnAttach hook
+                                    return
+                                end
+                            end
+                        end
+                        ply:ChatPrint("No compatible free slot for this attachment!")
+                    else
+                        ply:ChatPrint("Weapon does not support attachments.")
+                    end
+                else
+                    ply:ChatPrint("Not a valid attachment.")
+                end
+            end
+
         elseif action == "use" then
             local container = net.ReadString()
             local index = net.ReadUInt(8)
@@ -836,6 +875,7 @@ if SERVER then
     -- When an attachment is put ON a gun, remove it from Tarkov Inventory
     hook.Add("ArcCW_OnAttach", "Tarkov_OnAttach", function(ply, wep, attName)
         EnsureProfile(ply)
+        print("[Tarkov] Attached: " .. tostring(attName))
 
         -- Need to find which item corresponds to this attachment shortname
         -- Since multiple items might map to the same shortname (rare, but possible), or we just need to find ONE instance.
@@ -857,12 +897,15 @@ if SERVER then
 
         if removed then
              SyncInventory(ply) -- This will re-calculate ArcCW Inv (now with one less item), matching ArcCW's internal state
+        else
+             print("[Tarkov] Warning: Attached item " .. tostring(attName) .. " not found in inventory to remove!")
         end
     end)
 
     -- When an attachment is taken OFF a gun, add it to Tarkov Inventory
     hook.Add("ArcCW_OnDetach", "Tarkov_OnDetach", function(ply, wep, index, attName)
         EnsureProfile(ply)
+        print("[Tarkov] Detached: " .. tostring(attName))
 
         -- Convert ShortName -> EntityClass (ItemID)
         local itemID = Tarkov_ArcCW_ReverseMap[attName]
@@ -1181,21 +1224,55 @@ if CLIENT then
             local itemID = LocalData.Equipment[slotInfo.name]
 
             local function HandleEquipDrop(self, panels, bDoDrop, Command, x, y)
+                local src = panels[1].DragData
+                if not src then return end
+
+                -- 1. ATTACHMENT DROP LOGIC (Primary/Secondary Only)
+                if slotInfo.name == "Primary" or slotInfo.name == "Secondary" then
+                    local list = LocalData.Containers[src.Container]
+                    if list and list[src.Index] then
+                         local itemID = list[src.Index]
+                         local shortName = Tarkov_ArcCW_Map[itemID]
+                         if shortName then
+                              local wepID = LocalData.Equipment[slotInfo.name]
+                              local isCompatible = false
+                              if wepID then
+                                   local wep = LocalPlayer():GetWeapon(wepID)
+                                   -- Simple client-side check: Does weapon exist?
+                                   -- Ideally we check ArcCW compatibility here, but strict check is server-side.
+                                   -- We'll assume compatible if it's an attachment and weapon exists.
+                                   if IsValid(wep) and wep.Attachments then isCompatible = true end
+                              end
+
+                              -- Set Highlight for Paint (Green=Good, Red=Bad)
+                              self.HoverColor = isCompatible and Color(0, 255, 0, 50) or Color(255, 0, 0, 50)
+
+                              if bDoDrop and isCompatible then
+                                  net.Start(TAG .. "_Action")
+                                  net.WriteString("attach_equip")
+                                  net.WriteString(slotInfo.name)
+                                  net.WriteString(src.Container)
+                                  net.WriteUInt(src.Index, 8)
+                                  net.SendToServer()
+                              end
+                              return -- Stop processing as equip
+                         end
+                    end
+                end
+
+                -- 2. STANDARD EQUIP DROP LOGIC
                 if bDoDrop then
-                    local src = panels[1].DragData
-                    if src then
-                        local list = LocalData.Containers[src.Container]
-                        if list and list[src.Index] then
-                             local dropItemID = list[src.Index]
-                             local itemData = ITEMS[dropItemID]
-                             if itemData and itemData.Slot == slotInfo.name then
-                                 net.Start(TAG .. "_Action")
-                                 net.WriteString("equip")
-                                 net.WriteString(src.Container)
-                                 net.WriteUInt(src.Index, 8)
-                                 net.SendToServer()
-                             end
-                        end
+                    local list = LocalData.Containers[src.Container]
+                    if list and list[src.Index] then
+                         local dropItemID = list[src.Index]
+                         local itemData = ITEMS[dropItemID]
+                         if itemData and itemData.Slot == slotInfo.name then
+                             net.Start(TAG .. "_Action")
+                             net.WriteString("equip")
+                             net.WriteString(src.Container)
+                             net.WriteUInt(src.Index, 8)
+                             net.SendToServer()
+                         end
                     end
                 end
             end
@@ -1209,6 +1286,17 @@ if CLIENT then
             function() -- Quick Action (Ctrl+Click)
                 net.Start(TAG.."_Action"); net.WriteString("unequip"); net.WriteString(slotInfo.name); net.SendToServer()
             end)
+
+            -- Override Paint to handle Highlight
+            local oldPaint = pnl.Paint
+            pnl.Paint = function(s, w, h)
+                oldPaint(s, w, h)
+                if s.HoverColor then
+                    draw.RoundedBox(4, 0, 0, w, h, s.HoverColor)
+                    s.HoverColor = nil -- Reset for next frame
+                end
+            end
+
             pnl:SetPos(slotInfo.x, slotInfo.y)
             local lbl = vgui.Create("DLabel", pnl); lbl:SetText(slotInfo.name); lbl:SizeToContents(); lbl:SetPos(2, 2)
         end
