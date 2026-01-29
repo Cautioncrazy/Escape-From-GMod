@@ -48,3 +48,11 @@ if SERVER then
 else
     include("modules/hud/cl_hud.lua")
 end
+
+-- Load RaPD Config
+if SERVER then
+    AddCSLuaFile("modules/rapd/sh_rapd_config.lua")
+    include("modules/rapd/sh_rapd_config.lua")
+else
+    include("modules/rapd/sh_rapd_config.lua")
+end

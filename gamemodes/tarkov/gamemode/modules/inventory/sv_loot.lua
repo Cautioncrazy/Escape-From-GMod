@@ -35,6 +35,12 @@ local function BuildLootPools()
     -- Get All Items from shared registry
     local allItems = GetAllTarkovItems()
 
+    -- Safety Check
+    if not allItems then
+        print("[Tarkov Bridge] CRITICAL ERROR: GetAllTarkovItems returned nil!")
+        return
+    end
+
     -- Reset Pools
     LOOT_POOLS = {
         ["weapons"] = {},
@@ -56,7 +62,7 @@ local function BuildLootPools()
         local lName = string.lower(data.Name or "")
 
         -- Categorize based on ID, Type, or Description
-        if data.Slot == "Primary" or data.Slot == "Secondary" or string.find(lId, "weapon") then
+        if data.Slot == "Primary" or data.Slot == "Secondary" or data.Slot == "Melee" or data.Slot == "Grenade" or string.find(lId, "weapon") then
             table.insert(LOOT_POOLS["weapons"], id)
         end
 
@@ -98,6 +104,21 @@ hook.Add("InitPostEntity", "TarkovBuildPools", function()
     timer.Simple(5, function()
         BuildLootPools()
     end)
+end)
+
+-- DEBUG: Console command to force rebuild
+concommand.Add("tarkov_debug_loot", function(ply)
+    if IsValid(ply) and not ply:IsSuperAdmin() then return end
+    print("--- TARKOV LOOT DEBUG ---")
+    local items = GetAllTarkovItems()
+    print("Total Registered Items: " .. table.Count(items))
+
+    BuildLootPools()
+
+    for pool, list in pairs(LOOT_POOLS) do
+        print("Pool [" .. pool .. "]: " .. #list .. " items")
+    end
+    print("-------------------------")
 end)
 
 -- Helper to get random item from pool
@@ -166,9 +187,6 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
     if class == "ent_loot_item" or string.sub(class, 1, 9) == "ent_item_" then
         return
     end
-
-    -- EXPLICIT IGNORE: Allow Tarkov Entities to handle themselves
-    if ent.IsTarkovLoot then return end
 
     -- Check cache first
     if CLASS_CACHE[class] == false then return end
