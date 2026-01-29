@@ -238,21 +238,51 @@ function TarkovGenerateItems()
     for class, entData in pairs(scripted_ents.GetList()) do
         local t = entData.t
         if t.Spawnable and t.PrintName and not ITEMS[class] then
-            -- Attempt to find a real model
-            local model = t.Model or t.WorldModel
+            local isArcCW = false
+            -- SPECIAL HANDLING: ArcCW Attachments that didn't match the expected "arccw_att_NAME" pattern
+            if ArcCW and ArcCW.AttachmentTable and (string.find(t.Category or "", "ArcCW") or string.find(t.Base or "", "arccw")) then
+                -- Try to find the matching attachment by PrintName
+                for shortName, data in pairs(ArcCW.AttachmentTable) do
+                    if data.PrintName == t.PrintName then
+                         -- FOUND MATCH!
+                         -- Map this REAL entity class to the shortname
+                         Tarkov_ArcCW_Map[class] = shortName
+                         Tarkov_ArcCW_ReverseMap[shortName] = class
 
-            -- If invalid or missing, fallback to box
-            if not model or model == "" or model == "models/error.mdl" then
-                model = "models/props_junk/cardboard_box004a.mdl"
+                         -- Find best model
+                         local mdl = t.Model or t.WorldModel or data.Model or data.WorldModel
+                         if not mdl or mdl == "" then mdl = "models/items/item_item_crate.mdl" end
+
+                         RegisterItem(class, {
+                             Name = data.PrintName or shortName,
+                             Desc = "Attachment: " .. (data.Description or "Modification"),
+                             Model = mdl,
+                             Type = "item",
+                             Weight = 0.5
+                         })
+                         isArcCW = true
+                         break
+                    end
+                end
             end
 
-            RegisterItem(class, {
-                Name = t.PrintName,
-                Desc = "Item: " .. (t.Category or "Misc"),
-                Model = model,
-                Type = "item",
-                Weight = 1.0
-            })
+            if not isArcCW then
+                -- Attempt to find a real model
+                local model = t.Model or t.WorldModel
+
+                -- If invalid or missing, fallback to box
+                if not model or model == "" or model == "models/error.mdl" then
+                    model = "models/props_junk/cardboard_box004a.mdl"
+                end
+
+                RegisterItem(class, {
+                    Name = t.PrintName,
+                    Desc = "Item: " .. (t.Category or "Misc"),
+                    Model = model,
+                    Type = "item",
+                    Weight = 1.0
+                })
+            end
         end
     end
     print("[Tarkov Inv] Generated dynamic items.")
