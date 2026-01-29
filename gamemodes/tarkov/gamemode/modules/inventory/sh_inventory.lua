@@ -304,6 +304,26 @@ if SERVER then
         end
     end
 
+    -- Helper: Timed Action
+    local function StartTimedAction(ply, duration, text, onSuccess)
+        if ply.IsSearching then return end
+
+        ply.IsSearching = true
+        ply.SearchEndTime = CurTime() + duration
+
+        net.Start(TAG .. "_SearchUI")
+        net.WriteFloat(duration)
+        net.WriteString(text)
+        net.Send(ply)
+
+        timer.Create("TarkovAction_" .. ply:SteamID64(), duration, 1, function()
+             if IsValid(ply) then
+                 ply.IsSearching = false
+                 onSuccess()
+             end
+        end)
+    end
+
     -- Helper: Add Item to best available container OR Equip if empty
     function AddItemToInventory(ply, itemId)
         EnsureProfile(ply)
@@ -594,34 +614,52 @@ if SERVER then
                 local itemID = itemList[index]
                 local itemData = ITEMS[itemID]
 
-                -- Support using ANY item if it maps to a scripted entity (like ammo)
-                -- or if it is a consumable defined below
-                local used = false
+                -- 1. Consumables (Timed)
+                if itemID == "tushonka" then
+                    StartTimedAction(ply, 3.0, "Eating...", function()
+                        if itemList[index] == itemID then -- Verify item exists
+                            ply:SetHealth(math.min(ply:Health() + 25, ply:GetMaxHealth()))
+                            ply:EmitSound("npc/barnacle/barnacle_crunch2.wav")
+                            itemList[index] = nil
+                            SyncInventory(ply)
+                        end
+                    end)
+                    return
+                elseif itemID == "medkit" then
+                    StartTimedAction(ply, 4.0, "Healing...", function()
+                        if itemList[index] == itemID then
+                            ply:SetHealth(math.min(ply:Health() + 50, ply:GetMaxHealth()))
+                            ply:EmitSound("items/medshot4.wav")
+                            itemList[index] = nil
+                            SyncInventory(ply)
+                        end
+                    end)
+                    return
+                end
 
-                -- 1. Try generic entity usage (Ammo, Weapons, etc.)
+                -- 2. Generic Entities (Weapons, Ammo, Attachments)
                 local entTable = scripted_ents.Get(itemID)
                 if entTable then
-                    -- Give the entity to the player (standard GMod behavior for ammo/weps)
-                    ply:Give(itemID)
-                    used = true
-                end
+                    -- Heuristic: Is it a weapon/ammo or an attachment?
+                    local isWeapon = entTable.Base == "weapon_base" or string.find(itemID, "weapon")
+                    if entTable.Base == "arccw_base" or entTable.Base == "arc9_base" then isWeapon = true end
+                    local isAmmo = string.find(itemID, "ammo")
 
-                -- 2. Try hardcoded consumables
-                if not used and itemData and itemData.Type == "item" then
-                    if itemID == "tushonka" then
-                        ply:SetHealth(math.min(ply:Health() + 25, ply:GetMaxHealth()))
-                        ply:EmitSound("npc/barnacle/barnacle_crunch2.wav")
-                        used = true
-                    elseif itemID == "medkit" then
-                        ply:SetHealth(math.min(ply:Health() + 50, ply:GetMaxHealth()))
-                        ply:EmitSound("items/medshot4.wav")
-                        used = true
+                    if isWeapon or isAmmo then
+                        ply:Give(itemID)
+                        itemList[index] = nil
+                        SyncInventory(ply)
+                    else
+                        -- Likely Attachment: Move to Inventory if in Cache
+                        if container == "cache" then
+                             if AddItemToInventory(ply, itemID) then
+                                 itemList[index] = nil
+                                 SyncInventory(ply)
+                             end
+                        else
+                             ply:ChatPrint("Use this item in the Customization Menu.")
+                        end
                     end
-                end
-
-                if used then
-                    itemList[index] = nil
-                    SyncInventory(ply)
                 end
             end
         end
@@ -705,8 +743,11 @@ if CLIENT then
     -- NEW: SEARCH UI
     local SearchEndTime = 0
     local SearchDuration = 0
+    local SearchText = "SEARCHING..."
+
     net.Receive(TAG .. "_SearchUI", function()
         SearchDuration = net.ReadFloat()
+        SearchText = net.ReadString() or "SEARCHING..."
         SearchEndTime = CurTime() + SearchDuration
     end)
 
@@ -716,7 +757,7 @@ if CLIENT then
             local pct = 1 - ((SearchEndTime - CurTime()) / SearchDuration)
             draw.RoundedBox(4, w/2 - 100, h/2 + 50, 200, 20, Color(0,0,0,200))
             draw.RoundedBox(4, w/2 - 98, h/2 + 52, 196 * pct, 16, Color(200, 200, 200, 255))
-            draw.SimpleText("SEARCHING...", "DermaDefault", w/2, h/2 + 60, Color(255,255,255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            draw.SimpleText(SearchText, "DermaDefault", w/2, h/2 + 60, Color(255,255,255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
         end
     end)
 
@@ -1320,6 +1361,7 @@ if SERVER then
 
         net.Start(TAG .. "_SearchUI")
         net.WriteFloat(3.0)
+        net.WriteString("SEARCHING...")
         net.Send(activator)
 
         timer.Simple(3.0, function()

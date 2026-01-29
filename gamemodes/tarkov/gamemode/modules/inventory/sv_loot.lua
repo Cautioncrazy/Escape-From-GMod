@@ -237,6 +237,7 @@ hook.Add("PlayerUse", "TarkovBridge_Use", function(ply, ent)
     -- Send Search Progress Bar to Client
     net.Start(TAG .. "_SearchUI")
     net.WriteFloat(3.0) -- 3.0 Seconds duration
+    net.WriteString("SEARCHING...")
     net.Send(ply)
 
     -- 2. TIMER (Logic)
