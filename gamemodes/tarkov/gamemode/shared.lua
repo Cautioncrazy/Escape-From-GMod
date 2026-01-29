@@ -38,8 +38,10 @@ if SERVER then
     include("modules/inventory/sh_inventory.lua")
     include("modules/inventory/sv_loot.lua")
     include("modules/inventory/sv_attachments.lua")
+    AddCSLuaFile("modules/inventory/cl_attachments.lua")
 else
     include("modules/inventory/sh_inventory.lua")
+    include("modules/inventory/cl_attachments.lua")
 end
 
 -- Load HUD Module (Client Only)

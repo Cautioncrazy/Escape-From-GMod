@@ -711,6 +711,12 @@ end
 -- --- 3. CLIENT SIDE UI ---
 if CLIENT then
     local LocalData = { Equipment = {}, Containers = { pockets={}, secure={}, backpack={}, rig={}, cache={} } }
+
+    -- Ensure LocalPlayer has data
+    hook.Add("InitPostEntity", "TarkovInitLocalData", function()
+        if IsValid(LocalPlayer()) then LocalPlayer().TarkovData = LocalData end
+    end)
+
     local IsCacheOpen = false
     local CacheOpenedAt = 0 -- Track when the cache was opened
     local invFrame = nil
@@ -720,6 +726,7 @@ if CLIENT then
     net.Receive(TAG .. "_Update", function()
         local wasCacheOpen = IsCacheOpen
         LocalData = net.ReadTable()
+        if IsValid(LocalPlayer()) then LocalPlayer().TarkovData = LocalData end -- Sync for ArcCW
         IsCacheOpen = net.ReadBool()
 
         -- Detect if cache JUST opened

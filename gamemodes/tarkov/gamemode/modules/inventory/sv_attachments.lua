@@ -20,6 +20,17 @@ hook.Add("InitPostEntity", "TarkovAttachmentConfig", function()
         RunConsoleCommand("arc9_free_atts", "0")
         print("[Tarkov Config] Arc9 Free Attachments Disabled")
     end
+
+    -- AIM ASSIST DISABLE
+    if ConVarExists("arccw_aimassist") then
+        RunConsoleCommand("arccw_aimassist", "0")
+    end
+    if ConVarExists("arccw_aimassist_cl") then
+        RunConsoleCommand("arccw_aimassist_cl", "0")
+    end
+    if ConVarExists("arc9_aimassist") then
+        RunConsoleCommand("arc9_aimassist", "0")
+    end
 end)
 
 -- Helper to find an item in the player's inventory
