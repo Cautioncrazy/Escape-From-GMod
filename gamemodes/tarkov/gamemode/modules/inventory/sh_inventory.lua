@@ -107,115 +107,130 @@ RegisterItem("bitcoin", {
 })
 
 -- --- 4. DYNAMIC LOOT GENERATION (NEW) ---
+function TarkovGenerateItems()
+    -- Helper: Determine Slot Type
+    local function GetWeaponSlot(wep)
+        local class = string.lower(wep.ClassName or "")
+        local base = string.lower(wep.Base or "")
+        local cat = string.lower(wep.Category or "")
+        local name = string.lower(wep.PrintName or "")
+        local hold = string.lower(wep.HoldType or "")
+        local slot = wep.Slot or -1
+
+        -- 1. DETECT MELEE
+        if slot == 0 or hold == "melee" or hold == "melee2" or hold == "knife" or hold == "fist" then return "Melee" end
+        if string.find(base, "melee") or string.find(cat, "melee") or string.find(name, "knife") or string.find(name, "bayonet") then return "Melee" end
+
+        -- 2. DETECT GRENADE / THROWABLE
+        if slot == 4 or hold == "grenade" or hold == "slam" then return "Grenade" end
+        if string.find(base, "grenade") or string.find(cat, "grenade") or string.find(name, "grenade") or string.find(name, "smoke") or string.find(name, "flash") then return "Grenade" end
+        -- ArcCW specific check for throwables
+        if wep.Throwing or (wep.Primary and string.find(tostring(wep.Primary.Ammo), "grenade")) then return "Grenade" end
+
+        -- 3. DETECT SECONDARY (Pistols, SMGs, Launchers)
+        if slot == 1 or hold == "pistol" or hold == "revolver" then return "Secondary" end
+
+        -- Detect SMGs as secondary if explicit Slot 1 or defined by keywords
+        if string.find(cat, "secondary") then return "Secondary" end
+        -- Launchers / RPGs
+        if hold == "rpg" or string.find(name, "launcher") or string.find(name, "rpg") or string.find(cat, "launcher") then return "Secondary" end
+        -- Small SMGs / Machine Pistols
+        if hold == "smg" or string.find(name, "smg") or string.find(name, "mp7") or string.find(name, "mp9") or string.find(name, "mac") or string.find(name, "uzi") then
+            -- Default SMGs to Secondary unless explicitly marked as Slot 2 (Primary) AND not a "Machine Pistol"
+            if slot == 2 then
+                    if string.find(name, "machine pistol") or string.find(name, "micro") then return "Secondary" end
+                    return "Primary" -- Large SMG
+            end
+            return "Secondary"
+        end
+
+        -- 4. DEFAULT TO PRIMARY
+        return "Primary"
+    end
+
+    -- Scan for Spawnable Weapons
+    for _, wep in pairs(list.Get("Weapon")) do
+        if wep.Spawnable and wep.PrintName then
+            -- Protected call to prevent one bad weapon from breaking everything
+            local success, err = pcall(function()
+                local id = wep.ClassName
+                if not ITEMS[id] then
+                    -- Get the truest definition we can find
+                    local stored = weapons.GetStored(id) or wep
+
+                    -- FIX: Ensure a valid model exists, using common addon fields
+                    local mdl = stored.WorldModel
+                    if not mdl or mdl == "" then mdl = stored.WM end -- ArcCW/TFA
+                    if not mdl or mdl == "" then mdl = stored.ViewModel end -- Last resort
+
+                    -- Fallback to list entry if stored failed
+                    if not mdl or mdl == "" then mdl = wep.WorldModel end
+                    if not mdl or mdl == "" then mdl = wep.ViewModel end
+
+                    -- Sanity check for error model
+                    if not mdl or mdl == "" or mdl == "models/error.mdl" then
+                        mdl = "models/weapons/w_rif_ak47.mdl" -- Fallback generic weapon
+                    end
+
+                    -- DETERMINE SLOT
+                    local slot = GetWeaponSlot(stored)
+
+                    RegisterItem(id, {
+                        Name = wep.PrintName,
+                        Desc = "Weapon: " .. (wep.Category or "Unknown"),
+                        Model = mdl,
+                        Type = "equip",
+                        Slot = slot,
+                        Weight = 2.0
+                    })
+                end
+            end)
+            if not success then
+                print("[Tarkov Inv] Error registering weapon " .. tostring(wep.ClassName) .. ": " .. tostring(err))
+            end
+        end
+    end
+
+    -- Scan for Spawnable Entities (Simple Props logic)
+    for class, entData in pairs(scripted_ents.GetList()) do
+        local t = entData.t
+        if t.Spawnable and t.PrintName and not ITEMS[class] then
+            -- Attempt to find a real model
+            local model = t.Model or t.WorldModel
+
+            -- If invalid or missing, fallback to box
+            if not model or model == "" or model == "models/error.mdl" then
+                model = "models/props_junk/cardboard_box004a.mdl"
+            end
+
+            RegisterItem(class, {
+                Name = t.PrintName,
+                Desc = "Item: " .. (t.Category or "Misc"),
+                Model = model,
+                Type = "item",
+                Weight = 1.0
+            })
+        end
+    end
+    print("[Tarkov Inv] Generated dynamic items.")
+    hook.Run("TarkovItemsGenerated")
+end
+
 hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
     -- Delay generation to ensure all weapons (client & server) are fully registered
     timer.Simple(3, function()
-        -- Helper: Determine Slot Type
-        local function GetWeaponSlot(wep)
-            local class = string.lower(wep.ClassName or "")
-            local base = string.lower(wep.Base or "")
-            local cat = string.lower(wep.Category or "")
-            local name = string.lower(wep.PrintName or "")
-            local hold = string.lower(wep.HoldType or "")
-            local slot = wep.Slot or -1
-
-            -- 1. DETECT MELEE
-            if slot == 0 or hold == "melee" or hold == "melee2" or hold == "knife" or hold == "fist" then return "Melee" end
-            if string.find(base, "melee") or string.find(cat, "melee") or string.find(name, "knife") or string.find(name, "bayonet") then return "Melee" end
-
-            -- 2. DETECT GRENADE / THROWABLE
-            if slot == 4 or hold == "grenade" or hold == "slam" then return "Grenade" end
-            if string.find(base, "grenade") or string.find(cat, "grenade") or string.find(name, "grenade") or string.find(name, "smoke") or string.find(name, "flash") then return "Grenade" end
-            -- ArcCW specific check for throwables
-            if wep.Throwing or (wep.Primary and string.find(tostring(wep.Primary.Ammo), "grenade")) then return "Grenade" end
-
-            -- 3. DETECT SECONDARY (Pistols, SMGs, Launchers)
-            if slot == 1 or hold == "pistol" or hold == "revolver" then return "Secondary" end
-
-            -- Detect SMGs as secondary if explicit Slot 1 or defined by keywords
-            if string.find(cat, "secondary") then return "Secondary" end
-            -- Launchers / RPGs
-            if hold == "rpg" or string.find(name, "launcher") or string.find(name, "rpg") or string.find(cat, "launcher") then return "Secondary" end
-            -- Small SMGs / Machine Pistols
-            if hold == "smg" or string.find(name, "smg") or string.find(name, "mp7") or string.find(name, "mp9") or string.find(name, "mac") or string.find(name, "uzi") then
-                -- Default SMGs to Secondary unless explicitly marked as Slot 2 (Primary) AND not a "Machine Pistol"
-                if slot == 2 then
-                     if string.find(name, "machine pistol") or string.find(name, "micro") then return "Secondary" end
-                     return "Primary" -- Large SMG
-                end
-                return "Secondary"
-            end
-
-            -- 4. DEFAULT TO PRIMARY
-            return "Primary"
-        end
-
-        -- Scan for Spawnable Weapons
-        for _, wep in pairs(list.Get("Weapon")) do
-            if wep.Spawnable and wep.PrintName then
-                -- Protected call to prevent one bad weapon from breaking everything
-                local success, err = pcall(function()
-                    local id = wep.ClassName
-                    if not ITEMS[id] then
-                        -- Get the truest definition we can find
-                        local stored = weapons.GetStored(id) or wep
-
-                        -- FIX: Ensure a valid model exists, using common addon fields
-                        local mdl = stored.WorldModel
-                        if not mdl or mdl == "" then mdl = stored.WM end -- ArcCW/TFA
-                        if not mdl or mdl == "" then mdl = stored.ViewModel end -- Last resort
-
-                        -- Fallback to list entry if stored failed
-                        if not mdl or mdl == "" then mdl = wep.WorldModel end
-                        if not mdl or mdl == "" then mdl = wep.ViewModel end
-
-                        -- Sanity check for error model
-                        if not mdl or mdl == "" or mdl == "models/error.mdl" then
-                            mdl = "models/weapons/w_rif_ak47.mdl" -- Fallback generic weapon
-                        end
-
-                        -- DETERMINE SLOT
-                        local slot = GetWeaponSlot(stored)
-
-                        RegisterItem(id, {
-                            Name = wep.PrintName,
-                            Desc = "Weapon: " .. (wep.Category or "Unknown"),
-                            Model = mdl,
-                            Type = "equip",
-                            Slot = slot,
-                            Weight = 2.0
-                        })
-                    end
-                end)
-                if not success then
-                    print("[Tarkov Inv] Error registering weapon " .. tostring(wep.ClassName) .. ": " .. tostring(err))
-                end
-            end
-        end
-
-        -- Scan for Spawnable Entities (Simple Props logic)
-        for class, entData in pairs(scripted_ents.GetList()) do
-            local t = entData.t
-            if t.Spawnable and t.PrintName and not ITEMS[class] then
-                -- Attempt to find a real model
-                local model = t.Model or t.WorldModel
-
-                -- If invalid or missing, fallback to box
-                if not model or model == "" or model == "models/error.mdl" then
-                    model = "models/props_junk/cardboard_box004a.mdl"
-                end
-
-                RegisterItem(class, {
-                    Name = t.PrintName,
-                    Desc = "Item: " .. (t.Category or "Misc"),
-                    Model = model,
-                    Type = "item",
-                    Weight = 1.0
-                })
-            end
-        end
-        print("[Tarkov Inv] Generated dynamic items.")
+        TarkovGenerateItems()
     end)
+end)
+
+concommand.Add("tarkov_gen_items", function(ply)
+    if IsValid(ply) and not ply:IsSuperAdmin() then return end
+    print("[Tarkov Debug] Manually triggering dynamic item generation...")
+    TarkovGenerateItems()
+
+    local count = 0
+    for _ in pairs(ITEMS) do count = count + 1 end
+    print("[Tarkov Debug] Current Item Count: " .. count)
 end)
 
 -- --- 2. SERVER SIDE LOGIC ---
