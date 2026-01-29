@@ -20,6 +20,10 @@ hook.Add("InitPostEntity", "TarkovAttachmentConfig", function()
         RunConsoleCommand("arc9_free_atts", "0")
         print("[Tarkov Config] Arc9 Free Attachments Disabled")
     end
+    -- Arc9: Generate Entities (Fixes models)
+    if ConVarExists("arc9_atts_generate_entities") then
+        RunConsoleCommand("arc9_atts_generate_entities", "1")
+    end
 
     -- AIM ASSIST DISABLE
     if ConVarExists("arccw_aimassist") then
