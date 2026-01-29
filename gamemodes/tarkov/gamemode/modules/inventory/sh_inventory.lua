@@ -675,6 +675,8 @@ if CLIENT then
         LocalData = net.ReadTable()
         IsCacheOpen = net.ReadBool()
 
+        print("[TarkovUI] Update received. IsCacheOpen: " .. tostring(IsCacheOpen))
+
         -- Detect if cache JUST opened
         if IsCacheOpen and not wasCacheOpen then
              CacheOpenedAt = CurTime()
@@ -691,6 +693,10 @@ if CLIENT then
         elseif IsCacheOpen then
             OpenInventory(false) -- Auto Open if cache is active
         end
+    end)
+
+    concommand.Add("tarkov_open_inventory", function()
+        OpenInventory()
     end)
 
     -- NEW: SEARCH UI
@@ -849,6 +855,8 @@ if CLIENT then
     end
 
     function OpenInventory(bRefresh)
+        print("[TarkovUI] OpenInventory called. Refresh: " .. tostring(bRefresh))
+
         if IsValid(invFrame) and not bRefresh then
             invFrame:Close()
             invFrame = nil
