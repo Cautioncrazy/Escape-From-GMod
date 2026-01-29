@@ -159,16 +159,12 @@ if CLIENT then
         end
 
         local tr = LocalPlayer():GetEyeTrace()
-        local ent = tr.Entity
-        if IsValid(ent) and ent:GetClass() == CACHE_CLASS then
-            -- Draw Halo
-            halo.Add({ent}, Color(0, 255, 0), 2, 2, 1, true, true)
-
+        if IsValid(tr.Entity) and tr.Entity:GetClass() == CACHE_CLASS then
+            local ent = tr.Entity
             local tag = ent:GetNWString("LootPool", "random")
-            local w, h = ScrW(), ScrH()
+            local pos = ent:GetPos():ToScreen()
 
-            draw.SimpleText("LOOT CACHE", "DermaLarge", w / 2, h / 2 + 40, Color(0, 255, 0), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-            draw.SimpleText("Pool: " .. string.upper(tag), "DermaDefault", w / 2, h / 2 + 65, Color(255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            draw.SimpleText(tag, "DermaLarge", pos.x, pos.y, Color(0, 255, 0), TEXT_ALIGN_CENTER)
         end
     end
 
@@ -286,21 +282,6 @@ if CLIENT then
         if IsValid(wep) and wep:GetClass() == "weapon_tarkov_admin" then
             OpenToolMenu()
             return false -- Prevent default C menu from stealing focus if you want exclusive control
-        end
-    end)
-
-    -- Force C-Menu for Base Gamemode (which doesn't have ContextMenuOpen)
-    hook.Add("Think", "TarkovAdminMenu_ForceC", function()
-        if input.IsButtonDown(KEY_C) then
-            local ply = LocalPlayer()
-            if not IsValid(ply) then return end
-
-            local wep = ply:GetActiveWeapon()
-            if IsValid(wep) and wep:GetClass() == "weapon_tarkov_admin" then
-                if not IsValid(frame) then
-                    OpenToolMenu()
-                end
-            end
         end
     end)
 

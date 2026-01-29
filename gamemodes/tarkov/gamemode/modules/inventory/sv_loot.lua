@@ -106,21 +106,6 @@ hook.Add("InitPostEntity", "TarkovBuildPools", function()
     end)
 end)
 
--- DEBUG: Console command to force rebuild
-concommand.Add("tarkov_debug_loot", function(ply)
-    if IsValid(ply) and not ply:IsSuperAdmin() then return end
-    print("--- TARKOV LOOT DEBUG ---")
-    local items = GetAllTarkovItems()
-    print("Total Registered Items: " .. table.Count(items))
-
-    BuildLootPools()
-
-    for pool, list in pairs(LOOT_POOLS) do
-        print("Pool [" .. pool .. "]: " .. #list .. " items")
-    end
-    print("-------------------------")
-end)
-
 -- Helper to get random item from pool
 local function GetRandomItem(poolName)
     local pool = LOOT_POOLS[poolName]

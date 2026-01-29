@@ -151,10 +151,7 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
         end
 
         -- Scan for Spawnable Weapons
-        local weaponList = list.Get("Weapon")
-        print("[Tarkov Inv] Scanning " .. table.Count(weaponList) .. " weapons...")
-
-        for _, wep in pairs(weaponList) do
+        for _, wep in pairs(list.Get("Weapon")) do
             if wep.Spawnable and wep.PrintName then
                 -- Protected call to prevent one bad weapon from breaking everything
                 local success, err = pcall(function()
@@ -197,10 +194,7 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
         end
 
         -- Scan for Spawnable Entities (Simple Props logic)
-        local entList = scripted_ents.GetList()
-        print("[Tarkov Inv] Scanning " .. table.Count(entList) .. " entities...")
-
-        for class, entData in pairs(entList) do
+        for class, entData in pairs(scripted_ents.GetList()) do
             local t = entData.t
             if t.Spawnable and t.PrintName and not ITEMS[class] then
                 -- Attempt to find a real model
@@ -220,7 +214,7 @@ hook.Add("InitPostEntity", "TarkovGenDynamicItems", function()
                 })
             end
         end
-        print("[Tarkov Inv] Generated dynamic items. Total items registered: " .. table.Count(ITEMS))
+        print("[Tarkov Inv] Generated dynamic items.")
     end)
 end)
 
@@ -675,8 +669,6 @@ if CLIENT then
         LocalData = net.ReadTable()
         IsCacheOpen = net.ReadBool()
 
-        print("[TarkovUI] Update received. IsCacheOpen: " .. tostring(IsCacheOpen))
-
         -- Detect if cache JUST opened
         if IsCacheOpen and not wasCacheOpen then
              CacheOpenedAt = CurTime()
@@ -693,10 +685,6 @@ if CLIENT then
         elseif IsCacheOpen then
             OpenInventory(false) -- Auto Open if cache is active
         end
-    end)
-
-    concommand.Add("tarkov_open_inventory", function()
-        OpenInventory()
     end)
 
     -- NEW: SEARCH UI
@@ -855,8 +843,6 @@ if CLIENT then
     end
 
     function OpenInventory(bRefresh)
-        print("[TarkovUI] OpenInventory called. Refresh: " .. tostring(bRefresh))
-
         if IsValid(invFrame) and not bRefresh then
             invFrame:Close()
             invFrame = nil
@@ -1292,7 +1278,55 @@ if SERVER then
         self:SetModel("models/items/item_item_crate.mdl")
         self:PhysicsInit(SOLID_VPHYSICS); self:SetMoveType(MOVETYPE_VPHYSICS); self:SetSolid(SOLID_VPHYSICS); self:SetUseType(SIMPLE_USE)
         local phys = self:GetPhysicsObject(); if IsValid(phys) then phys:Wake() end
-        -- Loot generation is handled by sv_loot.lua via PlayerUse hook to support lazy loading
+
+    end
+
+    function ENT_CACHE:Use(activator)
+        if not IsValid(activator) or not activator:IsPlayer() then return end
+
+        EnsureProfile(activator) -- Make sure profile exists
+
+        -- Check if already searched
+        if activator.SearchedCaches[self:EntIndex()] then
+            -- SKIP SEARCH - Open Immediately
+            activator.ActiveLootCache = self
+            activator.TarkovData.Containers.cache = table.Copy(self.CacheInventory)
+            net.Start(TAG .. "_Update")
+            net.WriteTable(activator.TarkovData)
+            net.WriteBool(true)
+            net.Send(activator)
+            return
+        end
+
+        if activator.IsSearching then return end
+
+        activator.IsSearching = true
+        activator:EmitSound("physics/cardboard/cardboard_box_impact_soft2.wav")
+
+        net.Start(TAG .. "_SearchUI")
+        net.WriteFloat(3.0)
+        net.Send(activator)
+
+        timer.Simple(3.0, function()
+            if not IsValid(activator) or not IsValid(self) then return end
+            if activator:GetPos():DistToSqr(self:GetPos()) > 150*150 then
+                activator.IsSearching = false
+                return
+            end
+
+            activator.IsSearching = false
+            activator.ActiveLootCache = self
+            activator.SearchedCaches[self:EntIndex()] = true -- MARK AS SEARCHED
+
+            -- Copy data to player session
+            activator.TarkovData.Containers.cache = table.Copy(self.CacheInventory)
+
+            -- Open UI
+            net.Start(TAG .. "_Update")
+            net.WriteTable(activator.TarkovData)
+            net.WriteBool(true)
+            net.Send(activator)
+        end)
     end
 end
 
