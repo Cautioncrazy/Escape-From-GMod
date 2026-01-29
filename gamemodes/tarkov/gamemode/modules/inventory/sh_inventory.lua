@@ -108,30 +108,42 @@ RegisterItem("bitcoin", {
 
 -- --- 4. DYNAMIC LOOT GENERATION (NEW) ---
 local Tarkov_ArcCW_Map = {} -- Map EntityClass -> ArcCW ShortName
+local Tarkov_ArcCW_ReverseMap = {} -- Map ArcCW ShortName -> EntityClass
 
 function TarkovGenerateItems()
     -- Build ArcCW Map & Register Items Properly
     if ArcCW and ArcCW.AttachmentTable then
         for shortName, data in pairs(ArcCW.AttachmentTable) do
-             -- 1. Populate Map
-             if data.Entity then
-                 Tarkov_ArcCW_Map[data.Entity] = shortName
+             -- 1. Determine the Best Entity Class ID
+             -- ArcCW attachments usually have a corresponding entity.
+             -- If .Entity is nil, it usually defaults to "arccw_att_" .. shortName
+             local entName = data.Entity
+             if not entName then
+                 entName = "arccw_att_" .. shortName
              end
+
+             -- Verify this entity exists in Scripted Ents to avoid phantom items
+             -- If not found, we still register it but it might not spawn via loot pools if they rely on scripted_ents.
+             -- However, ArcCW creates these entities automatically, so they should be there.
+
+             -- 2. Populate Maps
+             Tarkov_ArcCW_Map[entName] = shortName
+             -- Also map shortName to itself for safety in lookup
              Tarkov_ArcCW_Map[shortName] = shortName
 
-             local entName = "arccw_att_" .. shortName
-             Tarkov_ArcCW_Map[entName] = shortName
+             Tarkov_ArcCW_ReverseMap[shortName] = entName
 
-             -- 2. Register Item with Correct Model
-             -- We prioritize the entity name that will likely be spawned (arccw_att_...)
-             -- This preempts the generic scripted_ents loop below
-             local targetID = data.Entity or entName
+             -- 3. Register Item with Correct Model
+             if not ITEMS[entName] then
+                 -- Find best model
+                 local mdl = data.Model
+                 if not mdl or mdl == "" then mdl = data.WorldModel end
+                 if not mdl or mdl == "" then mdl = "models/items/item_item_crate.mdl" end
 
-             if not ITEMS[targetID] then
-                 RegisterItem(targetID, {
+                 RegisterItem(entName, {
                      Name = data.PrintName or shortName,
                      Desc = "Attachment: " .. (data.Description or "Modification"),
-                     Model = data.Model or "models/items/item_item_crate.mdl", -- Fallback if data.Model is missing, but usually present
+                     Model = mdl,
                      Type = "item",
                      Weight = 0.5
                  })
@@ -323,6 +335,35 @@ if SERVER then
 
     -- Sync Function (Forward Declaration)
     local SyncInventory
+
+    -- Helper: Sync Tarkov Inventory to ArcCW Internal Inventory (Passive Integration)
+    local function SyncTarkovToArcCW(ply)
+        if not ArcCW then return end
+
+        -- Build a count of all attachments currently in Tarkov Inventory
+        local attCounts = {}
+
+        -- Helper to scan a container
+        local function ScanContainer(contName)
+             local list = ply.TarkovData.Containers[contName]
+             if not list then return end
+             for _, itemID in pairs(list) do
+                 local shortName = Tarkov_ArcCW_Map[itemID]
+                 if shortName then
+                     attCounts[shortName] = (attCounts[shortName] or 0) + 1
+                 end
+             end
+        end
+
+        ScanContainer("pockets")
+        ScanContainer("backpack")
+        ScanContainer("rig")
+        ScanContainer("secure")
+
+        -- Update ArcCW
+        ply.ArcCW_AttInv = attCounts
+        if ArcCW.PlayerSendAttInv then ArcCW:PlayerSendAttInv(ply) end
+    end
 
     -- Helper: Stop Looting Logic
     local function StopLooting(ply)
@@ -701,24 +742,13 @@ if SERVER then
                         itemList[index] = nil
                         SyncInventory(ply)
                     else
-                        -- Attachments: Give to standard inventory for ArcCW/Arc9 to detect
-                        local given = false
-
-                        -- Check ArcCW Map
+                        -- Attachments: Passive Integration
+                        -- If it maps to an ArcCW attachment, we don't need to "Use" it. It's already synced via SyncInventory.
                         local arcCWID = Tarkov_ArcCW_Map[itemID]
-                        if ArcCW and ArcCW.PlayerGiveAtt and arcCWID then
-                            ArcCW:PlayerGiveAtt(ply, arcCWID, 1)
-                            if ArcCW.PlayerSendAttInv then ArcCW:PlayerSendAttInv(ply) end -- Force Sync
-                            given = true
-                        end
-
-                        if given then
-                            itemList[index] = nil
-                            SyncInventory(ply)
-                            ply:ChatPrint("Added " .. (ITEMS[itemID].Name or itemID) .. " to weapon inventory.")
+                        if arcCWID then
+                             ply:ChatPrint("This attachment is available in your customization menu (C).")
                         else
-                             -- DO NOT SPAWN PROP.
-                             -- If it's not a weapon and not an attachment we know, we can't 'Use' it.
+                             -- Unknown Item
                              ply:ChatPrint("Cannot use this item directly.")
                         end
                     end
@@ -758,6 +788,9 @@ if SERVER then
             ply.TarkovData.Containers.cache = {}
         end
 
+        -- Passive Integration: Sync to ArcCW
+        SyncTarkovToArcCW(ply)
+
         net.Start(TAG .. "_Update")
         net.WriteTable(ply.TarkovData)
         net.WriteBool(IsValid(ply.ActiveLootCache))
@@ -767,6 +800,65 @@ if SERVER then
     concommand.Add("give_loot", function(ply, cmd, args)
         local id = args[1] or "tushonka"
         AddItemToInventory(ply, id)
+    end)
+
+    -- ArcCW Integration Hooks
+    -- When an attachment is put ON a gun, remove it from Tarkov Inventory
+    hook.Add("ArcCW_OnAttach", "Tarkov_OnAttach", function(ply, wep, attName)
+        EnsureProfile(ply)
+
+        -- Need to find which item corresponds to this attachment shortname
+        -- Since multiple items might map to the same shortname (rare, but possible), or we just need to find ONE instance.
+        -- We check ReverseMap first, but we really need to scan inventory for ANY item that maps to this shortName.
+
+        local function RemoveOne(contName)
+             local list = ply.TarkovData.Containers[contName]
+             if not list then return false end
+             for idx, itemID in pairs(list) do
+                 if Tarkov_ArcCW_Map[itemID] == attName then
+                     list[idx] = nil
+                     return true
+                 end
+             end
+             return false
+        end
+
+        local removed = RemoveOne("pockets") or RemoveOne("backpack") or RemoveOne("rig") or RemoveOne("secure")
+
+        if removed then
+             SyncInventory(ply) -- This will re-calculate ArcCW Inv (now with one less item), matching ArcCW's internal state
+        end
+    end)
+
+    -- When an attachment is taken OFF a gun, add it to Tarkov Inventory
+    hook.Add("ArcCW_OnDetach", "Tarkov_OnDetach", function(ply, wep, index, attName)
+        EnsureProfile(ply)
+
+        -- Convert ShortName -> EntityClass (ItemID)
+        local itemID = Tarkov_ArcCW_ReverseMap[attName]
+
+        if not itemID then
+             -- Fallback: If we don't have a reverse map (maybe just shortname?), try constructing it
+             itemID = "arccw_att_" .. attName
+             -- Or assume shortname IS the ID if registered?
+             if not ITEMS[itemID] then itemID = attName end
+        end
+
+        if ITEMS[itemID] then
+             if not AddItemToInventory(ply, itemID) then
+                  -- Inventory Full: Drop to ground
+                  local ent = ents.Create("ent_loot_item")
+                  ent:SetPos(ply:GetShootPos() + ply:GetAimVector() * 50)
+                  ent:SetAngles(Angle(0, ply:EyeAngles().y, 0))
+                  ent:DefineItem(itemID)
+                  ent:Spawn()
+                  ply:ChatPrint("Inventory full! Dropped attachment.")
+             end
+             -- SyncInventory is called inside AddItemToInventory (if successful) or we need to call it?
+             -- AddItem calls SyncInventory on success.
+        else
+             print("[Tarkov] Unknown attachment detached: " .. tostring(attName))
+        end
     end)
 end
 
