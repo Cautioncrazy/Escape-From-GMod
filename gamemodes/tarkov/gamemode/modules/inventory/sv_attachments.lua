@@ -3,6 +3,25 @@
 
 local TAG = "TarkovInv"
 
+-- CONFIGURATION
+hook.Add("InitPostEntity", "TarkovAttachmentConfig", function()
+    -- ArcCW: Disable free attachments (requires entity/inventory)
+    if ConVarExists("arccw_attinv_free") then
+        RunConsoleCommand("arccw_attinv_free", "0")
+        print("[Tarkov Config] ArcCW Free Attachments Disabled")
+    end
+    -- Ensure customization is enabled (just not free)
+    if ConVarExists("arccw_enable_customization") then
+        RunConsoleCommand("arccw_enable_customization", "1")
+    end
+
+    -- Arc9: Disable free attachments
+    if ConVarExists("arc9_free_atts") then
+        RunConsoleCommand("arc9_free_atts", "0")
+        print("[Tarkov Config] Arc9 Free Attachments Disabled")
+    end
+end)
+
 -- Helper to find an item in the player's inventory
 local function FindItem(ply, id)
     if not ply.TarkovData then return nil, nil end
