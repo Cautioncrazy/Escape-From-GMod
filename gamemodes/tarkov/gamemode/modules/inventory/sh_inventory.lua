@@ -998,8 +998,10 @@ if SERVER then
         end
 
         -- CRITICAL: Always sync to ensure ArcCW's internal inventory matches Tarkov's state
-        -- This deletes "ghost" items if they weren't added to Tarkov
-        SyncInventory(ply)
+        -- Delay sync to ensure ArcCW has finished its own inventory operations
+        timer.Simple(0.1, function()
+            if IsValid(ply) then SyncInventory(ply) end
+        end)
     end)
 
     -- ARC9 Integration Hooks
@@ -1054,7 +1056,9 @@ if SERVER then
              print("[Tarkov] Unknown detached Arc9 item: " .. tostring(attName))
         end
 
-        SyncInventory(ply)
+        timer.Simple(0.1, function()
+            if IsValid(ply) then SyncInventory(ply) end
+        end)
     end)
 end
 
