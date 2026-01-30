@@ -966,40 +966,57 @@ if SERVER then
 
     hook.Add("ArcCW_OnDetach", "Tarkov_OnDetach", function(ply, wep, index, attName)
         EnsureProfile(ply)
-        print("[Tarkov] ArcCW Detached: " .. tostring(attName))
+        -- DEBUG PRINT
+        if IsValid(ply) then ply:ChatPrint("[Debug] Detaching ArcCW: " .. tostring(attName)) end
+
+        -- Immediate Removal from Client ArcCW to prevent ghosting before sync
+        if IsValid(ply) and ply.ArcCW_AttInv and ply.ArcCW_AttInv[attName] then
+             ply.ArcCW_AttInv[attName] = ply.ArcCW_AttInv[attName] - 1
+             if ply.ArcCW_AttInv[attName] <= 0 then ply.ArcCW_AttInv[attName] = nil end
+        end
 
         local itemID = Tarkov_ArcCW_ReverseMap[attName]
         if not itemID then itemID = "arccw_att_" .. attName end
         if not ITEMS[itemID] then itemID = attName end
 
-        -- Fallback: Search all items for a match in the map (O(N) search)
+        -- Fallback: Search all items for a match in the map
         if not ITEMS[itemID] then
              for id, _ in pairs(ITEMS) do
                  if Tarkov_ArcCW_Map[id] == attName then
                      itemID = id
-                     print("[Tarkov] Found item via fallback search: " .. tostring(id))
                      break
                  end
              end
         end
 
+        -- FAILSAFE: If item still not found, register it on the fly to prevent loss
+        if not ITEMS[itemID] then
+             if IsValid(ply) then ply:ChatPrint("[Debug] Item ID not found, registering failsafe: " .. itemID) end
+             RegisterItem(itemID, {
+                 Name = attName,
+                 Desc = "Recovered Attachment",
+                 Model = "models/props_junk/cardboard_box004a.mdl",
+                 Type = "item",
+                 Weight = 0.5
+             })
+             -- Update maps
+             Tarkov_ArcCW_Map[itemID] = attName
+             Tarkov_ArcCW_ReverseMap[attName] = itemID
+        end
+
         if ITEMS[itemID] then
-             -- Try to add to inventory
              local added = AddItemToInventory(ply, itemID)
              if not added then
-                  -- Inventory Full: Drop to ground
                   local ent = ents.Create("ent_loot_item")
                   ent:SetPos(ply:GetShootPos() + ply:GetAimVector() * 50); ent:SetAngles(Angle(0, ply:EyeAngles().y, 0))
                   ent:DefineItem(itemID); ent:Spawn()
                   ply:ChatPrint("Inventory full! Dropped attachment.")
              end
         else
-            print("[Tarkov] Unknown detached item: " .. tostring(attName))
+            if IsValid(ply) then ply:ChatPrint("[Error] Failed to recover attachment: " .. tostring(attName)) end
         end
 
-        -- CRITICAL: Always sync to ensure ArcCW's internal inventory matches Tarkov's state
-        -- Delay sync to ensure ArcCW has finished its own inventory operations
-        timer.Simple(0.1, function()
+        timer.Simple(0.2, function()
             if IsValid(ply) then SyncInventory(ply) end
         end)
     end)
@@ -1007,6 +1024,7 @@ if SERVER then
     -- ARC9 Integration Hooks
     hook.Add("ARC9_OnAttach", "Tarkov_Arc9_OnAttach", function(ply, wep, attName)
         EnsureProfile(ply)
+        -- DEBUG PRINT
         print("[Tarkov] Arc9 Attached: " .. tostring(attName))
 
         local function RemoveOne(contName)
@@ -1027,21 +1045,39 @@ if SERVER then
 
     hook.Add("ARC9_OnDetach", "Tarkov_Arc9_OnDetach", function(ply, wep, attName)
         EnsureProfile(ply)
-        print("[Tarkov] Arc9 Detached: " .. tostring(attName))
+        if IsValid(ply) then ply:ChatPrint("[Debug] Detaching Arc9: " .. tostring(attName)) end
+
+        -- Immediate Removal
+        if IsValid(ply) and ply.ARC9_AttInv and ply.ARC9_AttInv[attName] then
+             ply.ARC9_AttInv[attName] = ply.ARC9_AttInv[attName] - 1
+             if ply.ARC9_AttInv[attName] <= 0 then ply.ARC9_AttInv[attName] = nil end
+        end
 
         local itemID = Tarkov_Arc9_ReverseMap[attName]
         if not itemID then itemID = "arc9_att_" .. attName end
         if not ITEMS[itemID] then itemID = attName end
 
-        -- Fallback Search
         if not ITEMS[itemID] then
              for id, _ in pairs(ITEMS) do
                  if Tarkov_Arc9_Map[id] == attName then
                      itemID = id
-                     print("[Tarkov] Found Arc9 item via fallback search: " .. tostring(id))
                      break
                  end
              end
+        end
+
+        -- FAILSAFE
+        if not ITEMS[itemID] then
+             if IsValid(ply) then ply:ChatPrint("[Debug] Item ID not found, registering failsafe: " .. itemID) end
+             RegisterItem(itemID, {
+                 Name = attName,
+                 Desc = "Recovered Arc9 Attachment",
+                 Model = "models/props_junk/cardboard_box004a.mdl",
+                 Type = "item",
+                 Weight = 0.5
+             })
+             Tarkov_Arc9_Map[itemID] = attName
+             Tarkov_Arc9_ReverseMap[attName] = itemID
         end
 
         if ITEMS[itemID] then
@@ -1052,11 +1088,9 @@ if SERVER then
                   ent:DefineItem(itemID); ent:Spawn()
                   ply:ChatPrint("Inventory full! Dropped attachment.")
              end
-        else
-             print("[Tarkov] Unknown detached Arc9 item: " .. tostring(attName))
         end
 
-        timer.Simple(0.1, function()
+        timer.Simple(0.2, function()
             if IsValid(ply) then SyncInventory(ply) end
         end)
     end)
