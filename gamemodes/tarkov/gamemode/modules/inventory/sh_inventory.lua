@@ -742,6 +742,9 @@ if SERVER then
                             if not slotData.Installed then
                                 if wep:Attach(i, shortName) then
                                     ply:EmitSound("weapons/arccw/install.wav")
+                                    -- Explicitly remove item to prevent duplication/persistence issues
+                                    list[index] = nil
+                                    SyncInventory(ply)
                                     return
                                 end
                             end
@@ -761,6 +764,9 @@ if SERVER then
                                   local success = wep:Attach(i, shortName)
                                   if success then
                                       ply:EmitSound("weapons/arc9/install.wav")
+                                      -- Explicitly remove item to prevent duplication/persistence issues
+                                      list[index] = nil
+                                      SyncInventory(ply)
                                       return
                                   end
                              end
@@ -906,6 +912,7 @@ if SERVER then
     -- ArcCW Integration Hooks
     hook.Add("ArcCW_OnAttach", "Tarkov_OnAttach", function(ply, wep, attName)
         EnsureProfile(ply)
+        print("[Tarkov] ArcCW Attached: " .. tostring(attName))
 
         local function RemoveOne(contName)
              local list = ply.TarkovData.Containers[contName]
@@ -919,12 +926,13 @@ if SERVER then
              return false
         end
 
-        local removed = RemoveOne("pockets") or RemoveOne("backpack") or RemoveOne("rig") or RemoveOne("secure")
+        local removed = RemoveOne("pockets") or RemoveOne("backpack") or RemoveOne("rig") or RemoveOne("secure") or RemoveOne("cache")
         if removed then SyncInventory(ply) end
     end)
 
     hook.Add("ArcCW_OnDetach", "Tarkov_OnDetach", function(ply, wep, index, attName)
         EnsureProfile(ply)
+        print("[Tarkov] ArcCW Detached: " .. tostring(attName))
         local itemID = Tarkov_ArcCW_ReverseMap[attName] or ("arccw_att_" .. attName)
         if not ITEMS[itemID] then itemID = attName end
 
@@ -935,12 +943,15 @@ if SERVER then
                   ent:DefineItem(itemID); ent:Spawn()
                   ply:ChatPrint("Inventory full! Dropped attachment.")
              end
+        else
+            print("[Tarkov] Unknown detached item: " .. tostring(attName))
         end
     end)
 
     -- ARC9 Integration Hooks
     hook.Add("ARC9_OnAttach", "Tarkov_Arc9_OnAttach", function(ply, wep, attName)
         EnsureProfile(ply)
+        print("[Tarkov] Arc9 Attached: " .. tostring(attName))
 
         local function RemoveOne(contName)
              local list = ply.TarkovData.Containers[contName]
@@ -954,7 +965,7 @@ if SERVER then
              return false
         end
 
-        local removed = RemoveOne("pockets") or RemoveOne("backpack") or RemoveOne("rig") or RemoveOne("secure")
+        local removed = RemoveOne("pockets") or RemoveOne("backpack") or RemoveOne("rig") or RemoveOne("secure") or RemoveOne("cache")
         if removed then SyncInventory(ply) end
     end)
 
@@ -1271,16 +1282,24 @@ if CLIENT then
                     local list = LocalData.Containers[src.Container]
                     if list and list[src.Index] then
                          local itemID = list[src.Index]
-                         local shortName = Tarkov_ArcCW_Map[itemID]
-                         if shortName then
+
+                         local isArcCW = Tarkov_ArcCW_Map[itemID]
+                         local isArc9 = Tarkov_Arc9_Map[itemID]
+
+                         if isArcCW or isArc9 then
                               local wepID = LocalData.Equipment[slotInfo.name]
                               local isCompatible = false
+
                               if wepID then
                                    local wep = LocalPlayer():GetWeapon(wepID)
-                                   -- Simple client-side check: Does weapon exist?
-                                   -- Ideally we check ArcCW compatibility here, but strict check is server-side.
-                                   -- We'll assume compatible if it's an attachment and weapon exists.
-                                   if IsValid(wep) and wep.Attachments then isCompatible = true end
+                                   if IsValid(wep) then
+                                        -- Basic client-side compatibility check
+                                        if isArcCW and wep.ArcCW and wep.Attachments then
+                                            isCompatible = true
+                                        elseif isArc9 and wep.ARC9 and wep.Attachments then
+                                            isCompatible = true
+                                        end
+                                   end
                               end
 
                               -- Set Highlight for Paint (Green=Good, Red=Bad)
