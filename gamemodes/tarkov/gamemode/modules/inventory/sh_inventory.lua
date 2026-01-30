@@ -972,6 +972,17 @@ if SERVER then
         if not itemID then itemID = "arccw_att_" .. attName end
         if not ITEMS[itemID] then itemID = attName end
 
+        -- Fallback: Search all items for a match in the map (O(N) search)
+        if not ITEMS[itemID] then
+             for id, _ in pairs(ITEMS) do
+                 if Tarkov_ArcCW_Map[id] == attName then
+                     itemID = id
+                     print("[Tarkov] Found item via fallback search: " .. tostring(id))
+                     break
+                 end
+             end
+        end
+
         if ITEMS[itemID] then
              -- Try to add to inventory
              local added = AddItemToInventory(ply, itemID)
@@ -981,13 +992,14 @@ if SERVER then
                   ent:SetPos(ply:GetShootPos() + ply:GetAimVector() * 50); ent:SetAngles(Angle(0, ply:EyeAngles().y, 0))
                   ent:DefineItem(itemID); ent:Spawn()
                   ply:ChatPrint("Inventory full! Dropped attachment.")
-                  -- Force sync because AddItemToInventory only syncs on success
-                  SyncInventory(ply)
              end
-             -- Note: AddItemToInventory calls SyncInventory on success
         else
             print("[Tarkov] Unknown detached item: " .. tostring(attName))
         end
+
+        -- CRITICAL: Always sync to ensure ArcCW's internal inventory matches Tarkov's state
+        -- This deletes "ghost" items if they weren't added to Tarkov
+        SyncInventory(ply)
     end)
 
     -- ARC9 Integration Hooks
@@ -1013,9 +1025,22 @@ if SERVER then
 
     hook.Add("ARC9_OnDetach", "Tarkov_Arc9_OnDetach", function(ply, wep, attName)
         EnsureProfile(ply)
+        print("[Tarkov] Arc9 Detached: " .. tostring(attName))
+
         local itemID = Tarkov_Arc9_ReverseMap[attName]
         if not itemID then itemID = "arc9_att_" .. attName end
         if not ITEMS[itemID] then itemID = attName end
+
+        -- Fallback Search
+        if not ITEMS[itemID] then
+             for id, _ in pairs(ITEMS) do
+                 if Tarkov_Arc9_Map[id] == attName then
+                     itemID = id
+                     print("[Tarkov] Found Arc9 item via fallback search: " .. tostring(id))
+                     break
+                 end
+             end
+        end
 
         if ITEMS[itemID] then
              local added = AddItemToInventory(ply, itemID)
@@ -1024,9 +1049,12 @@ if SERVER then
                   ent:SetPos(ply:GetShootPos() + ply:GetAimVector() * 50); ent:SetAngles(Angle(0, ply:EyeAngles().y, 0))
                   ent:DefineItem(itemID); ent:Spawn()
                   ply:ChatPrint("Inventory full! Dropped attachment.")
-                  SyncInventory(ply)
              end
+        else
+             print("[Tarkov] Unknown detached Arc9 item: " .. tostring(attName))
         end
+
+        SyncInventory(ply)
     end)
 end
 
