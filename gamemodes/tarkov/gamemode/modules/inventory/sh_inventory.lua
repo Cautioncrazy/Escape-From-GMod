@@ -1666,18 +1666,37 @@ if CLIENT then
 
         if not slotName then return end
 
+        print("[QuickKey] Detected Key: " .. slotName)
+
         local itemID = LocalData.Equipment[slotName]
-        if not itemID or not ITEMS[itemID] then return end
+        if not itemID then
+             print("[QuickKey] No item in slot: " .. slotName)
+             return
+        end
+        if not ITEMS[itemID] then
+             print("[QuickKey] Invalid item ID in slot: " .. tostring(itemID))
+             return
+        end
 
         local wep = ply:GetWeapon(itemID)
-        if not IsValid(wep) then return end
+        if not IsValid(wep) then
+             print("[QuickKey] Weapon entity not valid/found for: " .. tostring(itemID))
+             -- Try scanning weapons to see if we have it but under different class?
+             -- Usually ID matches class.
+             return
+        end
 
         -- Init Quick Action
         local activeWep = ply:GetActiveWeapon()
         if not IsValid(activeWep) then return end
 
         -- If already on this weapon, normal behavior
-        if activeWep == wep then return end
+        if activeWep == wep then
+             print("[QuickKey] Already holding weapon.")
+             return
+        end
+
+        print("[QuickKey] Switching to " .. tostring(wep))
 
         quickState.active = true
         quickState.type = slotName
@@ -1692,7 +1711,10 @@ if CLIENT then
              timer.Create("TarkovQuick_Cook", 0.4, 1, function()
                  if quickState.active and quickState.type == "Grenade" and quickState.holding then
                      if ply:GetActiveWeapon() == wep then
+                         print("[QuickKey] Cooking grenade...")
                          RunConsoleCommand("+attack")
+                     else
+                         print("[QuickKey] Cook failed - switched away too fast?")
                      end
                  end
              end)
@@ -1701,41 +1723,48 @@ if CLIENT then
 
     hook.Add("PlayerButtonUp", "TarkovQuickKeys_Up", function(ply, key)
         if not IsFirstTimePredicted() then return end
-        if not quickState.active then return end
 
         local slotName
         if key == KEY_G then slotName = "Grenade" end
         if key == KEY_V then slotName = "Melee" end
 
+        if not slotName then return end
+        if not quickState.active then return end
         if quickState.type ~= slotName then return end
+
+        print("[QuickKey] Released Key: " .. slotName)
 
         quickState.holding = false
         local duration = CurTime() - quickState.startTime
 
         local wep = ply:GetActiveWeapon()
-        if not IsValid(wep) then return end
+        -- Note: If we switched back already or something failed, this check is important
 
         -- MELEE LOGIC
         if slotName == "Melee" then
             if duration < 0.8 then
+                print("[QuickKey] Quick Melee Action")
                 -- Quick Melee: Attack then return
                 RunConsoleCommand("+attack")
                 timer.Simple(0.1, function() RunConsoleCommand("-attack") end)
 
                 timer.Create("TarkovQuick_Return", 0.6, 1, function()
                     if IsValid(ply) and quickState.active then
+                        print("[QuickKey] Returning to previous weapon")
                         local prev = ply:GetWeapon(quickState.prevWep)
                         if IsValid(prev) then input.SelectWeapon(prev) end
                         quickState.active = false
                     end
                 end)
             else
+                print("[QuickKey] Held Melee - Staying Equipped")
                 -- Held (>0.8s): Equip and Stay
                 quickState.active = false -- End quick state, stay on weapon
             end
 
         -- GRENADE LOGIC
         elseif slotName == "Grenade" then
+            print("[QuickKey] Throwing Grenade")
             -- Throw
             RunConsoleCommand("-attack") -- Release pin if cooking
 
@@ -1748,6 +1777,7 @@ if CLIENT then
             -- Switch back after throw delay
             timer.Create("TarkovQuick_Return", 1.0, 1, function()
                 if IsValid(ply) and quickState.active then
+                    print("[QuickKey] Returning to previous weapon")
                     local prev = ply:GetWeapon(quickState.prevWep)
                     if IsValid(prev) then input.SelectWeapon(prev) end
                     quickState.active = false
