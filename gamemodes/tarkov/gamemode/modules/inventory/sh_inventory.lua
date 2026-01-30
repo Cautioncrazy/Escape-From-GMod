@@ -1640,10 +1640,6 @@ if CLIENT then
         if bind == "noclip" then
             local itemID = LocalData.Equipment["Melee"]
             if itemID and ITEMS[itemID] then
-                 -- If we have a melee weapon equipped, BLOCK noclip so we can use it for quick melee
-                 -- But only if we are not in noclip already? No, standard tarkov logic overrides standard commands.
-                 -- Let's just return true to block it.
-                 -- CAUTION: This might annoy admins.
                  if ply:GetMoveType() ~= MOVETYPE_NOCLIP then
                      return true
                  end
@@ -1651,7 +1647,16 @@ if CLIENT then
         end
     end)
 
-    hook.Add("PlayerButtonDown", "TarkovQuickKeys", function(ply, key)
+    -- QUICK GRENADE / MELEE LOGIC
+    local quickState = {
+        active = false,
+        type = nil, -- "Melee" or "Grenade"
+        startTime = 0,
+        prevWep = nil,
+        holding = false
+    }
+
+    hook.Add("PlayerButtonDown", "TarkovQuickKeys_Down", function(ply, key)
         if not IsFirstTimePredicted() then return end
         if gui.IsGameUIVisible() or (vgui.GetKeyboardFocus() and vgui.GetKeyboardFocus():GetClassName() == "TextEntry") then return end
 
@@ -1661,66 +1666,93 @@ if CLIENT then
 
         if not slotName then return end
 
-        -- DEBUG
-        print("[TarkovQuick] Key Pressed: " .. slotName)
-
         local itemID = LocalData.Equipment[slotName]
-        if not itemID or not ITEMS[itemID] then
-            print("[TarkovQuick] No item in slot or invalid item.")
-            return
+        if not itemID or not ITEMS[itemID] then return end
+
+        local wep = ply:GetWeapon(itemID)
+        if not IsValid(wep) then return end
+
+        -- Init Quick Action
+        local activeWep = ply:GetActiveWeapon()
+        if not IsValid(activeWep) then return end
+
+        -- If already on this weapon, normal behavior
+        if activeWep == wep then return end
+
+        quickState.active = true
+        quickState.type = slotName
+        quickState.startTime = CurTime()
+        quickState.prevWep = activeWep:GetClass()
+        quickState.holding = true
+
+        input.SelectWeapon(wep)
+
+        -- Grenade specific: Cook logic starts immediately after deploy
+        if slotName == "Grenade" then
+             timer.Create("TarkovQuick_Cook", 0.4, 1, function()
+                 if quickState.active and quickState.type == "Grenade" and quickState.holding then
+                     if ply:GetActiveWeapon() == wep then
+                         RunConsoleCommand("+attack")
+                     end
+                 end
+             end)
         end
+    end)
 
-        local wepClass = itemID
-        local wep = ply:GetWeapon(wepClass)
+    hook.Add("PlayerButtonUp", "TarkovQuickKeys_Up", function(ply, key)
+        if not IsFirstTimePredicted() then return end
+        if not quickState.active then return end
 
-        -- DEBUG
-        print("[TarkovQuick] Item: " .. itemID .. " | Entity Valid: " .. tostring(IsValid(wep)))
+        local slotName
+        if key == KEY_G then slotName = "Grenade" end
+        if key == KEY_V then slotName = "Melee" end
 
-        if IsValid(wep) then
-            local currentWep = ply:GetActiveWeapon()
-            if not IsValid(currentWep) then return end
+        if quickState.type ~= slotName then return end
 
-            -- If already active, just attack
-            if currentWep == wep then
-                 RunConsoleCommand("+attack")
-                 timer.Simple(0.1, function() RunConsoleCommand("-attack") end)
-                 return
+        quickState.holding = false
+        local duration = CurTime() - quickState.startTime
+
+        local wep = ply:GetActiveWeapon()
+        if not IsValid(wep) then return end
+
+        -- MELEE LOGIC
+        if slotName == "Melee" then
+            if duration < 0.8 then
+                -- Quick Melee: Attack then return
+                RunConsoleCommand("+attack")
+                timer.Simple(0.1, function() RunConsoleCommand("-attack") end)
+
+                timer.Create("TarkovQuick_Return", 0.6, 1, function()
+                    if IsValid(ply) and quickState.active then
+                        local prev = ply:GetWeapon(quickState.prevWep)
+                        if IsValid(prev) then input.SelectWeapon(prev) end
+                        quickState.active = false
+                    end
+                end)
+            else
+                -- Held (>0.8s): Equip and Stay
+                quickState.active = false -- End quick state, stay on weapon
             end
 
-            local prevWepClass = currentWep:GetClass()
+        -- GRENADE LOGIC
+        elseif slotName == "Grenade" then
+            -- Throw
+            RunConsoleCommand("-attack") -- Release pin if cooking
 
-            -- Switch
-            input.SelectWeapon(wep)
+            -- If released very quickly, ensure we attack at least once
+            if duration < 0.4 then
+                 RunConsoleCommand("+attack")
+                 timer.Simple(0.1, function() RunConsoleCommand("-attack") end)
+            end
 
-            -- Timed Attack Sequence
-            -- Increased initial delay slightly to account for slow deployments
-            timer.Create("TarkovQuick_"..slotName, 0.5, 1, function()
-                if not IsValid(ply) then return end
-
-                -- Check if switch happened
-                if ply:GetActiveWeapon() ~= wep then
-                    print("[TarkovQuick] Switch failed or interrupted. Active: " .. tostring(ply:GetActiveWeapon()))
-                    return
+            -- Switch back after throw delay
+            timer.Create("TarkovQuick_Return", 1.0, 1, function()
+                if IsValid(ply) and quickState.active then
+                    local prev = ply:GetWeapon(quickState.prevWep)
+                    if IsValid(prev) then input.SelectWeapon(prev) end
+                    quickState.active = false
                 end
-
-                RunConsoleCommand("+attack")
-
-                timer.Simple(0.2, function()
-                    RunConsoleCommand("-attack")
-
-                    timer.Simple(0.6, function()
-                        if not IsValid(ply) then return end
-                        -- Only switch back if we are still holding the quick weapon
-                        if ply:GetActiveWeapon() == wep then
-                             local prev = ply:GetWeapon(prevWepClass)
-                             if IsValid(prev) then input.SelectWeapon(prev) end
-                        end
-                    end)
-                end)
             end)
-        else
-            -- Debug: why is weapon invalid?
-            print("[TarkovQuick] Weapon entity not found on client. Latency?")
         end
     end)
 end

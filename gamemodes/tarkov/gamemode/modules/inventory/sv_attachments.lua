@@ -35,6 +35,9 @@ hook.Add("InitPostEntity", "TarkovAttachmentConfig", function()
     if ConVarExists("arc9_aimassist") then
         RunConsoleCommand("arc9_aimassist", "0")
     end
+
+    -- FORCE DISABLE NOCLIP
+    RunConsoleCommand("sbox_noclip", "0")
 end)
 
 -- Helper to find an item in the player's inventory
