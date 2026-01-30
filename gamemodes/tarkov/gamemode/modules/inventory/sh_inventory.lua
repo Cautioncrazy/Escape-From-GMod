@@ -110,43 +110,51 @@ RegisterItem("bitcoin", {
 local Tarkov_ArcCW_Map = {} -- Map EntityClass -> ArcCW ShortName
 local Tarkov_ArcCW_ReverseMap = {} -- Map ArcCW ShortName -> EntityClass
 
+local Tarkov_Arc9_Map = {} -- Map EntityClass -> Arc9 ShortName
+local Tarkov_Arc9_ReverseMap = {} -- Map Arc9 ShortName -> EntityClass
+
 function TarkovGenerateItems()
-    -- Build ArcCW Map & Register Items Properly
+    -- 1. ARCCW GENERATION
     if ArcCW and ArcCW.AttachmentTable then
         for shortName, data in pairs(ArcCW.AttachmentTable) do
-             -- 1. Determine the Best Entity Class ID
-             -- ArcCW attachments usually have a corresponding entity.
-             -- If .Entity is nil, it usually defaults to "arccw_att_" .. shortName
              local entName = data.Entity
-             if not entName then
-                 entName = "arccw_att_" .. shortName
-             end
+             if not entName then entName = "arccw_att_" .. shortName end
 
-             -- Verify this entity exists in Scripted Ents to avoid phantom items
-             -- If not found, we still register it but it might not spawn via loot pools if they rely on scripted_ents.
-             -- However, ArcCW creates these entities automatically, so they should be there.
-
-             -- 2. Populate Maps
              Tarkov_ArcCW_Map[entName] = shortName
-             -- Also map shortName to itself for safety in lookup
              Tarkov_ArcCW_Map[shortName] = shortName
-
              Tarkov_ArcCW_ReverseMap[shortName] = entName
 
-             -- 3. Register Item with Correct Model
              if not ITEMS[entName] then
-                 -- Find best model
-                 local mdl = data.Model
-                 if not mdl or mdl == "" then mdl = data.WorldModel end
-                 -- Try Arc9/Standard fallback keys
-                 if not mdl or mdl == "" then mdl = data.WM end
-                 if not mdl or mdl == "" then mdl = data.ViewModel end
-
+                 local mdl = data.Model or data.WorldModel or data.WM or data.ViewModel
                  if not mdl or mdl == "" then mdl = "models/items/item_item_crate.mdl" end
 
                  RegisterItem(entName, {
                      Name = data.PrintName or shortName,
-                     Desc = "Attachment: " .. (data.Description or "Modification"),
+                     Desc = "[ArcCW] " .. (data.Description or "Modification"),
+                     Model = mdl,
+                     Type = "item",
+                     Weight = 0.5
+                 })
+             end
+        end
+    end
+
+    -- 2. ARC9 GENERATION
+    if ARC9 and ARC9.DB then
+        for shortName, data in pairs(ARC9.DB) do
+             local entName = "arc9_att_" .. shortName
+
+             Tarkov_Arc9_Map[entName] = shortName
+             Tarkov_Arc9_Map[shortName] = shortName
+             Tarkov_Arc9_ReverseMap[shortName] = entName
+
+             if not ITEMS[entName] then
+                 local mdl = data.Model or data.WorldModel or data.WM or data.ViewModel
+                 if not mdl or mdl == "" then mdl = "models/items/item_item_crate.mdl" end
+
+                 RegisterItem(entName, {
+                     Name = data.PrintName or shortName,
+                     Desc = "[Arc9] " .. (data.Description or "Modification"),
                      Model = mdl,
                      Type = "item",
                      Weight = 0.5
@@ -722,29 +730,53 @@ if SERVER then
 
             if wepID and list and list[index] then
                 local itemID = list[index]
-                local shortName = Tarkov_ArcCW_Map[itemID]
+                local wep = ply:GetWeapon(wepID)
 
-                if shortName then
-                    local wep = ply:GetWeapon(wepID)
-                    if IsValid(wep) and wep.Attachments then
-                        -- Attempt to auto-attach to first compatible free slot
+                if not IsValid(wep) then return end
+
+                -- 1. ArcCW Handling
+                if wep.ArcCW and Tarkov_ArcCW_Map[itemID] then
+                    local shortName = Tarkov_ArcCW_Map[itemID]
+                    if wep.Attachments then
                         for i, slotData in pairs(wep.Attachments) do
                             if not slotData.Installed then
-                                -- Try attach
                                 if wep:Attach(i, shortName) then
                                     ply:EmitSound("weapons/arccw/install.wav")
-                                    -- Success! Item removal is handled by ArcCW_OnAttach hook
                                     return
                                 end
                             end
                         end
-                        ply:ChatPrint("No compatible free slot for this attachment!")
-                    else
-                        ply:ChatPrint("Weapon does not support attachments.")
+                        ply:ChatPrint("[ArcCW] No compatible slot found.")
                     end
-                else
-                    ply:ChatPrint("Not a valid attachment.")
+                    return
                 end
+
+                -- 2. Arc9 Handling
+                if wep.ARC9 and Tarkov_Arc9_Map[itemID] then
+                    local shortName = Tarkov_Arc9_Map[itemID]
+                    if wep.Attachments then
+                        for i, slotData in pairs(wep.Attachments) do
+                             if not slotData.Installed then
+                                  -- Arc9:Attach(slotIndex, attName)
+                                  local success = wep:Attach(i, shortName)
+                                  if success then
+                                      ply:EmitSound("weapons/arc9/install.wav")
+                                      return
+                                  end
+                             end
+                        end
+                        ply:ChatPrint("[Arc9] No compatible slot found.")
+                    end
+                    return
+                end
+
+                -- 3. Cross-Incompatibility Check
+                if (wep.ArcCW and Tarkov_Arc9_Map[itemID]) or (wep.ARC9 and Tarkov_ArcCW_Map[itemID]) then
+                    ply:ChatPrint("This attachment is not compatible with this weapon base.")
+                    return
+                end
+
+                ply:ChatPrint("Weapon does not support this attachment.")
             end
 
         elseif action == "use" then
@@ -872,14 +904,8 @@ if SERVER then
     end)
 
     -- ArcCW Integration Hooks
-    -- When an attachment is put ON a gun, remove it from Tarkov Inventory
     hook.Add("ArcCW_OnAttach", "Tarkov_OnAttach", function(ply, wep, attName)
         EnsureProfile(ply)
-        print("[Tarkov] Attached: " .. tostring(attName))
-
-        -- Need to find which item corresponds to this attachment shortname
-        -- Since multiple items might map to the same shortname (rare, but possible), or we just need to find ONE instance.
-        -- We check ReverseMap first, but we really need to scan inventory for ANY item that maps to this shortName.
 
         local function RemoveOne(contName)
              local list = ply.TarkovData.Containers[contName]
@@ -894,43 +920,56 @@ if SERVER then
         end
 
         local removed = RemoveOne("pockets") or RemoveOne("backpack") or RemoveOne("rig") or RemoveOne("secure")
-
-        if removed then
-             SyncInventory(ply) -- This will re-calculate ArcCW Inv (now with one less item), matching ArcCW's internal state
-        else
-             print("[Tarkov] Warning: Attached item " .. tostring(attName) .. " not found in inventory to remove!")
-        end
+        if removed then SyncInventory(ply) end
     end)
 
-    -- When an attachment is taken OFF a gun, add it to Tarkov Inventory
     hook.Add("ArcCW_OnDetach", "Tarkov_OnDetach", function(ply, wep, index, attName)
         EnsureProfile(ply)
-        print("[Tarkov] Detached: " .. tostring(attName))
-
-        -- Convert ShortName -> EntityClass (ItemID)
-        local itemID = Tarkov_ArcCW_ReverseMap[attName]
-
-        if not itemID then
-             -- Fallback: If we don't have a reverse map (maybe just shortname?), try constructing it
-             itemID = "arccw_att_" .. attName
-             -- Or assume shortname IS the ID if registered?
-             if not ITEMS[itemID] then itemID = attName end
-        end
+        local itemID = Tarkov_ArcCW_ReverseMap[attName] or ("arccw_att_" .. attName)
+        if not ITEMS[itemID] then itemID = attName end
 
         if ITEMS[itemID] then
              if not AddItemToInventory(ply, itemID) then
-                  -- Inventory Full: Drop to ground
                   local ent = ents.Create("ent_loot_item")
-                  ent:SetPos(ply:GetShootPos() + ply:GetAimVector() * 50)
-                  ent:SetAngles(Angle(0, ply:EyeAngles().y, 0))
-                  ent:DefineItem(itemID)
-                  ent:Spawn()
+                  ent:SetPos(ply:GetShootPos() + ply:GetAimVector() * 50); ent:SetAngles(Angle(0, ply:EyeAngles().y, 0))
+                  ent:DefineItem(itemID); ent:Spawn()
                   ply:ChatPrint("Inventory full! Dropped attachment.")
              end
-             -- SyncInventory is called inside AddItemToInventory (if successful) or we need to call it?
-             -- AddItem calls SyncInventory on success.
-        else
-             print("[Tarkov] Unknown attachment detached: " .. tostring(attName))
+        end
+    end)
+
+    -- ARC9 Integration Hooks
+    hook.Add("ARC9_OnAttach", "Tarkov_Arc9_OnAttach", function(ply, wep, attName)
+        EnsureProfile(ply)
+
+        local function RemoveOne(contName)
+             local list = ply.TarkovData.Containers[contName]
+             if not list then return false end
+             for idx, itemID in pairs(list) do
+                 if Tarkov_Arc9_Map[itemID] == attName then
+                     list[idx] = nil
+                     return true
+                 end
+             end
+             return false
+        end
+
+        local removed = RemoveOne("pockets") or RemoveOne("backpack") or RemoveOne("rig") or RemoveOne("secure")
+        if removed then SyncInventory(ply) end
+    end)
+
+    hook.Add("ARC9_OnDetach", "Tarkov_Arc9_OnDetach", function(ply, wep, attName)
+        EnsureProfile(ply)
+        local itemID = Tarkov_Arc9_ReverseMap[attName] or ("arc9_att_" .. attName)
+        if not ITEMS[itemID] then itemID = attName end
+
+        if ITEMS[itemID] then
+             if not AddItemToInventory(ply, itemID) then
+                  local ent = ents.Create("ent_loot_item")
+                  ent:SetPos(ply:GetShootPos() + ply:GetAimVector() * 50); ent:SetAngles(Angle(0, ply:EyeAngles().y, 0))
+                  ent:DefineItem(itemID); ent:Spawn()
+                  ply:ChatPrint("Inventory full! Dropped attachment.")
+             end
         end
     end)
 end
