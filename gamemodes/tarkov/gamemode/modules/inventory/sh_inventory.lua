@@ -738,17 +738,36 @@ if SERVER then
                 if wep.ArcCW and Tarkov_ArcCW_Map[itemID] then
                     local shortName = Tarkov_ArcCW_Map[itemID]
                     if wep.Attachments then
+                        -- Temporarily give item to player's internal ArcCW inv so wep:Attach passes ownership check
+                        if container == "cache" then
+                             if not ply.ArcCW_AttInv then ply.ArcCW_AttInv = {} end
+                             ply.ArcCW_AttInv[shortName] = (ply.ArcCW_AttInv[shortName] or 0) + 1
+                        end
+
+                        local attached = false
                         for i, slotData in pairs(wep.Attachments) do
                             if not slotData.Installed then
                                 if wep:Attach(i, shortName) then
                                     ply:EmitSound("weapons/arccw/install.wav")
-                                    -- Explicitly remove item to prevent duplication/persistence issues
-                                    list[index] = nil
-                                    SyncInventory(ply)
-                                    return
+                                    attached = true
+                                    break
                                 end
                             end
                         end
+
+                        -- Revert temporary grant if failed (or if success, the hook consumes it, but we handle it explicitly)
+                        if container == "cache" and not attached then
+                             ply.ArcCW_AttInv[shortName] = ply.ArcCW_AttInv[shortName] - 1
+                             if ply.ArcCW_AttInv[shortName] <= 0 then ply.ArcCW_AttInv[shortName] = nil end
+                        end
+
+                        if attached then
+                            -- Explicitly remove item from cache/inv
+                            list[index] = nil
+                            SyncInventory(ply) -- This will rebuild the real ArcCW_AttInv from Tarkov inventory
+                            return
+                        end
+
                         ply:ChatPrint("[ArcCW] No compatible slot found.")
                     end
                     return
@@ -758,19 +777,34 @@ if SERVER then
                 if wep.ARC9 and Tarkov_Arc9_Map[itemID] then
                     local shortName = Tarkov_Arc9_Map[itemID]
                     if wep.Attachments then
+                        -- Arc9 likely checks ply.ARC9_AttInv
+                        if container == "cache" then
+                             if not ply.ARC9_AttInv then ply.ARC9_AttInv = {} end
+                             ply.ARC9_AttInv[shortName] = (ply.ARC9_AttInv[shortName] or 0) + 1
+                        end
+
+                        local attached = false
                         for i, slotData in pairs(wep.Attachments) do
                              if not slotData.Installed then
-                                  -- Arc9:Attach(slotIndex, attName)
-                                  local success = wep:Attach(i, shortName)
-                                  if success then
+                                  if wep:Attach(i, shortName) then
                                       ply:EmitSound("weapons/arc9/install.wav")
-                                      -- Explicitly remove item to prevent duplication/persistence issues
-                                      list[index] = nil
-                                      SyncInventory(ply)
-                                      return
+                                      attached = true
+                                      break
                                   end
                              end
                         end
+
+                        if container == "cache" and not attached then
+                             ply.ARC9_AttInv[shortName] = ply.ARC9_AttInv[shortName] - 1
+                             if ply.ARC9_AttInv[shortName] <= 0 then ply.ARC9_AttInv[shortName] = nil end
+                        end
+
+                        if attached then
+                            list[index] = nil
+                            SyncInventory(ply)
+                            return
+                        end
+
                         ply:ChatPrint("[Arc9] No compatible slot found.")
                     end
                     return
@@ -933,16 +967,24 @@ if SERVER then
     hook.Add("ArcCW_OnDetach", "Tarkov_OnDetach", function(ply, wep, index, attName)
         EnsureProfile(ply)
         print("[Tarkov] ArcCW Detached: " .. tostring(attName))
-        local itemID = Tarkov_ArcCW_ReverseMap[attName] or ("arccw_att_" .. attName)
+
+        local itemID = Tarkov_ArcCW_ReverseMap[attName]
+        if not itemID then itemID = "arccw_att_" .. attName end
         if not ITEMS[itemID] then itemID = attName end
 
         if ITEMS[itemID] then
-             if not AddItemToInventory(ply, itemID) then
+             -- Try to add to inventory
+             local added = AddItemToInventory(ply, itemID)
+             if not added then
+                  -- Inventory Full: Drop to ground
                   local ent = ents.Create("ent_loot_item")
                   ent:SetPos(ply:GetShootPos() + ply:GetAimVector() * 50); ent:SetAngles(Angle(0, ply:EyeAngles().y, 0))
                   ent:DefineItem(itemID); ent:Spawn()
                   ply:ChatPrint("Inventory full! Dropped attachment.")
+                  -- Force sync because AddItemToInventory only syncs on success
+                  SyncInventory(ply)
              end
+             -- Note: AddItemToInventory calls SyncInventory on success
         else
             print("[Tarkov] Unknown detached item: " .. tostring(attName))
         end
@@ -971,15 +1013,18 @@ if SERVER then
 
     hook.Add("ARC9_OnDetach", "Tarkov_Arc9_OnDetach", function(ply, wep, attName)
         EnsureProfile(ply)
-        local itemID = Tarkov_Arc9_ReverseMap[attName] or ("arc9_att_" .. attName)
+        local itemID = Tarkov_Arc9_ReverseMap[attName]
+        if not itemID then itemID = "arc9_att_" .. attName end
         if not ITEMS[itemID] then itemID = attName end
 
         if ITEMS[itemID] then
-             if not AddItemToInventory(ply, itemID) then
+             local added = AddItemToInventory(ply, itemID)
+             if not added then
                   local ent = ents.Create("ent_loot_item")
                   ent:SetPos(ply:GetShootPos() + ply:GetAimVector() * 50); ent:SetAngles(Angle(0, ply:EyeAngles().y, 0))
                   ent:DefineItem(itemID); ent:Spawn()
                   ply:ChatPrint("Inventory full! Dropped attachment.")
+                  SyncInventory(ply)
              end
         end
     end)
